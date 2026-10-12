@@ -334,3 +334,19 @@ textarea.input { min-height: 84px; resize: vertical; }
   .label-sheet { gap: 0.1in; }
   .label { border-color: #bbb; }
 }
+
+/* ---------- Full rig check & compartments ---------- */
+.rig-card { display: flex; align-items: center; gap: 14px; width: 100%; text-align: left; padding: 16px; border-radius: 16px;
+  border: 0; background: var(--brand); color: #fff; box-shadow: var(--shadow); }
+.rig-card .t-icon { width: 50px; height: 50px; border-radius: 14px; display: grid; place-items: center; background: rgba(255,255,255,.18); flex: none; }
+.rig-card .t-name { font-size: 20px; font-weight: 700; }
+.rig-card .t-sub { font-size: 14px; opacity: .88; margin-top: 1px; }
+.rig-card .chev { color: rgba(255,255,255,.8); }
+.rig-card .badge { background: #fff; }
+.rig-card:active { transform: scale(.99); }
+.comp-title { margin: 14px 4px 6px; font-weight: 700; font-size: 15px; color: var(--ink-2); }
+.kind { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; padding: 2px 7px; border-radius: 6px; margin-left: 4px; vertical-align: 2px; }
+.kind-bag { background: var(--brand-soft); color: var(--brand); }
+.kind-eq { background: var(--surface-2); color: var(--ink-2); border: 1px solid var(--line); }
+.rpt-rig { border-left: 4px solid var(--brand); }
+.rpt-rigline { font-size: 14px; margin: 2px 2px 4px; }
