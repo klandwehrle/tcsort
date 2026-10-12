@@ -1,7 +1,7 @@
 /* SORT Inventory — offline-capable front end. Talks to the Apps Script API in config.js. */
 'use strict';
 
-const APP_VERSION = '1.4.0';
+const APP_VERSION = '1.5.0';
 const API_URL = ((window.APP_CONFIG || {}).API_URL || '').trim();
 
 /* =============================== Storage & state =============================== */
@@ -38,7 +38,7 @@ const invCount = (n) => n + (n === 1 ? ' inventory' : ' inventories');
 /** Re-draw after background data changes, but never under someone mid-task. */
 function softRender() {
   const [p0, p1] = S.route;
-  if (p0 === 'check' || p0 === 'reports' || p0 === 'account' || $('.modal')) return;
+  if (p0 === 'check' || p0 === 'rig' || p0 === 'scan' || p0 === 'reports' || p0 === 'account' || $('.modal')) return;
   if (p0 === 'admin' && (p1 === 'users' || p1 === 'settings')) return;
   render();
 }
@@ -85,6 +85,7 @@ const I = {
   chart: '<svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><path d="M4 20h16M7 16v-5M12 16V7M17 16v-8" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>',
   user: '<svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><circle cx="12" cy="8.5" r="3.8" fill="none" stroke="currentColor" stroke-width="2"/><path d="M4.5 20c1.2-3.6 4-5.2 7.5-5.2s6.3 1.6 7.5 5.2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
   qr: '<svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M14 14h2.5v2.5H14zM17.5 17.5H20V20h-2.5zM14 18.5h2v1.5h-2zM18.5 14H20v2h-1.5z" fill="currentColor"/></svg>',
+  truck: '<svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><path d="M2.5 6.5h11v9h-11zM13.5 9.5h4l3 3.2v2.8h-7z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><circle cx="6.5" cy="17" r="1.8" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="17" cy="17" r="1.8" fill="none" stroke="currentColor" stroke-width="2"/><path d="M5 9h2.5v4H5zM9 9h2.5v4H9z" fill="currentColor"/></svg>',
   scan: '<svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><path d="M4 8V5.5A1.5 1.5 0 015.5 4H8M16 4h2.5A1.5 1.5 0 0120 5.5V8M20 16v2.5a1.5 1.5 0 01-1.5 1.5H16M8 20H5.5A1.5 1.5 0 014 18.5V16M4 12h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
   scanSm: '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M4 8V5.5A1.5 1.5 0 015.5 4H8M16 4h2.5A1.5 1.5 0 0120 5.5V8M20 16v2.5a1.5 1.5 0 01-1.5 1.5H16M8 20H5.5A1.5 1.5 0 014 18.5V16M4 12h16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>',
   share: '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M12 15V3M7.5 7.5L12 3l4.5 4.5M5 12v7a2 2 0 002 2h10a2 2 0 002-2v-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
@@ -100,8 +101,23 @@ const D = {
   bagsOf: (vehicleId) => (S.data?.bags || []).filter((b) => b.vehicleId === vehicleId),
   itemsOf: (bagId) => (S.data?.items || []).filter((i) => i.bagId === bagId),
   ropesOf: (bagId) => (S.data?.ropes || []).filter((r) => r.bagId === bagId),
-  lastCheck: (bagId) => (S.data?.lastChecks || {})[bagId]
+  lastCheck: (bagId) => (S.data?.lastChecks || {})[bagId],
+  compartment: (id) => (S.data?.compartments || []).find((c) => c.id === id),
+  compartmentsOf: (vehicleId) => (S.data?.compartments || []).filter((c) => c.vehicleId === vehicleId),
+  largeOf: (vehicleId) => (S.data?.large || []).filter((e) => e.vehicleId === vehicleId),
+  lastRig: (vehicleId) => (S.data?.lastRigChecks || {})[vehicleId]
 };
+
+/** Compartments of a vehicle (in order) with their bags and large equipment; unassigned last. */
+function compGroups(vehicleId) {
+  const comps = D.compartmentsOf(vehicleId), bags = D.bagsOf(vehicleId), large = D.largeOf(vehicleId);
+  const groups = comps.map((c) => ({ id: c.id, name: c.name, notes: c.notes,
+    bags: bags.filter((b) => b.compartmentId === c.id), large: large.filter((e) => e.compartmentId === c.id) }));
+  const ub = bags.filter((b) => !b.compartmentId), ul = large.filter((e) => !e.compartmentId);
+  if (ub.length || ul.length) groups.push({ id: '', name: comps.length ? 'No compartment assigned' : 'On this vehicle', notes: '', bags: ub, large: ul });
+  return groups;
+}
+const compOpts = (vehicleId) => D.compartmentsOf(vehicleId).map((c) => ({ value: c.id, label: c.name }));
 const ropeFlagged = (r) => r.status === 'Damaged - Review' || r.status === 'Out of Service';
 
 /* ===================================== API ===================================== */
@@ -316,6 +332,7 @@ function render() {
     case 'agency': return renderVehicles(p1);
     case 'vehicle': return renderBags(p1);
     case 'check': return renderCheck(p1, p2);
+    case 'rig': return renderRig(p1);
     case 'scan': return renderScan();
     case 's': return resolveScan(p1 || '');
     case 'account': return renderAccount();
@@ -422,9 +439,8 @@ function renderHome() {
     (pending ? '<div class="card" style="margin-bottom:12px;border-color:var(--warn)"><strong>' + invCount(pending) + ' saved on this device</strong><div class="muted small">They will upload automatically when you are online.</div></div>' : '') +
     '<div class="tiles">' +
     '<button class="tile primary" data-go="#/inventory"><div class="t-icon">' + I.clip + '</div><div><div class="t-name">Inventory</div><div class="t-sub">Check off vehicles, bags &amp; ropes</div></div></button>' +
-    '<button class="tile" data-go="#/scan"><div class="t-icon">' + I.scan + '</div><div><div class="t-name">Scan label</div><div class="t-sub">Scan a bag or rope barcode to open its inventory</div></div></button>' +
     (isAdmin ?
-      '<button class="tile" data-go="#/admin"><div class="t-icon">' + I.gear + '</div><div><div class="t-name">Admin</div><div class="t-sub">Vehicles, bags, equipment, ropes, users</div></div></button>' +
+      '<button class="tile" data-go="#/admin"><div class="t-icon">' + I.gear + '</div><div><div class="t-name">Admin</div><div class="t-sub">Vehicles, compartments, bags, equipment, ropes, users</div></div></button>' +
       '<button class="tile" data-go="#/reports"><div class="t-icon">' + I.chart + '</div><div><div class="t-name">Reports</div><div class="t-sub">Agency, vehicle &amp; bag reports, history, rope logs' + (flagged ? ' · <b style="color:var(--bad)">' + plural(flagged, 'rope') + ' flagged</b>' : '') + '</div></div></button>' : '') +
     '<button class="tile" data-go="#/share"><div class="t-icon">' + I.qr + '</div><div><div class="t-name">Share app</div><div class="t-sub">QR code &amp; add-to-phone steps</div></div></button>' +
     '<button class="tile" data-go="#/account"><div class="t-icon">' + I.user + '</div><div><div class="t-name">My account</div><div class="t-sub">Password, sync, sign out</div></div></button>' +
@@ -462,7 +478,8 @@ function renderVehicles(agencyId) {
       const last = bags.map((b) => D.lastCheck(b.id)).filter(Boolean).sort((a, b) => (a.at < b.at ? 1 : -1))[0];
       const flagged = bags.some((b) => D.ropesOf(b.id).some(ropeFlagged));
       return '<button class="list-item" data-go="#/vehicle/' + encodeURIComponent(v.id) + '"><div class="main"><div class="name">' + esc(v.name) + (v.unit ? ' <span class="muted">· ' + esc(v.unit) + '</span>' : '') + '</div>' +
-        '<div class="sub">' + plural(bags.length, 'bag') + ' · Last check: ' + esc(last ? ago(last.at) : 'Never') + '</div></div>' +
+        '<div class="sub">' + plural(bags.length, 'bag') + ' · Last bag check: ' + esc(last ? ago(last.at) : 'Never') + '</div>' +
+        '<div class="sub">Full rig check: ' + esc(D.lastRig(v.id) ? ago(D.lastRig(v.id).at) : 'Never') + '</div></div>' +
         (flagged ? '<span class="badge bad">Rope flag</span>' : '') + I.chev + '</button>';
     }).join('') + '</div>' : emptyBox('No vehicles for this agency yet.'));
   bindGo();
@@ -473,24 +490,150 @@ function renderBags(vehicleId) {
   if (!v) return go('#/inventory');
   const ag = D.agency(v.agencyId);
   setHeader(v.name, (ag ? ag.name : '') + (v.unit ? ' › ' + v.unit : ''), ag ? '#/agency/' + encodeURIComponent(ag.id) : '#/inventory');
-  const bags = D.bagsOf(v.id);
-  view().innerHTML = (v.notes ? '<div class="card small muted">' + esc(v.notes) + '</div>' : '') +
-    '<div class="section-title">Bags</div>' +
-    (bags.length ? '<div class="list">' + bags.map((b) => {
-      const last = D.lastCheck(b.id);
-      const ni = D.itemsOf(b.id).length, nr = D.ropesOf(b.id).length;
-      const flagged = D.ropesOf(b.id).some(ropeFlagged);
-      const draft = LS.get('draft.' + b.id, null);
-      let badge = '';
-      if (draft) badge = '<span class="badge warn">In progress</span>';
-      else if (last && (last.missing || last.damaged)) badge = '<span class="badge bad">' + (last.missing ? last.missing + ' missing' : last.damaged + ' damaged') + '</span>';
-      else if (last && ago(last.at).indexOf('Today') === 0) badge = '<span class="badge ok">Done today</span>';
-      return '<button class="list-item" data-go="#/check/' + encodeURIComponent(b.id) + '"><div class="main"><div class="name">' + esc(b.name) + '</div>' +
-        '<div class="sub">' + (b.compartment ? esc(b.compartment) + ' · ' : '') + plural(ni, 'item') + (nr ? ' · ' + plural(nr, 'rope') : '') + '</div>' +
-        '<div class="sub">Last: ' + esc(last ? ago(last.at) + ' by ' + last.by : 'Never checked') + '</div></div>' +
-        (flagged ? '<span class="badge bad">Rope flag</span>' : badge) + I.chev + '</button>';
-    }).join('') + '</div>' : emptyBox('No bags on this vehicle yet.'));
+  const bags = D.bagsOf(v.id), large = D.largeOf(v.id), comps = D.compartmentsOf(v.id);
+  const rig = D.lastRig(v.id), rigDraft = LS.get('draft.rig.' + v.id, null);
+  let rigBadge = '';
+  if (rigDraft) rigBadge = '<span class="badge warn">In progress</span>';
+  else if (rig && (rig.missing || rig.damaged)) rigBadge = '<span class="badge bad">' + (rig.missing ? rig.missing + ' missing' : rig.damaged + ' damaged') + '</span>';
+  else if (rig && ago(rig.at).indexOf('Today') === 0) rigBadge = '<span class="badge ok">Done today</span>';
+  const bagRow = (b) => {
+    const last = D.lastCheck(b.id);
+    const ni = D.itemsOf(b.id).length, nr = D.ropesOf(b.id).length;
+    const flagged = D.ropesOf(b.id).some(ropeFlagged);
+    const draft = LS.get('draft.' + b.id, null);
+    let badge = '';
+    if (draft) badge = '<span class="badge warn">In progress</span>';
+    else if (last && (last.missing || last.damaged)) badge = '<span class="badge bad">' + (last.missing ? last.missing + ' missing' : last.damaged + ' damaged') + '</span>';
+    else if (last && ago(last.at).indexOf('Today') === 0) badge = '<span class="badge ok">Done today</span>';
+    return '<button class="list-item" data-go="#/check/' + encodeURIComponent(b.id) + '"><div class="main"><div class="name">' + esc(b.name) + '</div>' +
+      '<div class="sub">' + (!b.compartmentId && b.compartment ? esc(b.compartment) + ' · ' : '') + plural(ni, 'item') + (nr ? ' · ' + plural(nr, 'rope') : '') + '</div>' +
+      '<div class="sub">Last: ' + esc(last ? ago(last.at) + ' by ' + last.by : 'Never checked') + '</div></div>' +
+      (flagged ? '<span class="badge bad">Rope flag</span>' : badge) + I.chev + '</button>';
+  };
+  const groups = compGroups(v.id).filter((g) => g.bags.length);
+  view().innerHTML = (v.notes ? '<div class="card small muted" style="margin-bottom:10px">' + esc(v.notes) + '</div>' : '') +
+    '<button class="rig-card" data-go="#/rig/' + encodeURIComponent(v.id) + '"><div class="t-icon">' + I.truck + '</div>' +
+    '<div class="grow"><div class="t-name">Full rig check</div>' +
+    '<div class="t-sub">Confirm every bag and large item is in its compartment</div>' +
+    '<div class="t-sub">' + plural(comps.length, 'compartment') + ' · ' + plural(bags.length, 'bag') + ' · ' + plural(large.length, 'large item') + '</div>' +
+    '<div class="t-sub">Last: ' + esc(rig ? ago(rig.at) + ' by ' + rig.by : 'Never') + '</div></div>' + rigBadge + I.chev + '</button>' +
+    '<div class="section-title" style="margin-top:20px">Bag inventories <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:500">— check what\'s inside each bag</span></div>' +
+    (groups.length ? groups.map((g) => (groups.length > 1 || g.id ? '<div class="comp-title">' + esc(g.name) + '</div>' : '') +
+      '<div class="list">' + g.bags.map(bagRow).join('') + '</div>').join('') : emptyBox('No bags on this vehicle yet.'));
   bindGo();
+}
+
+/* ---------- Full rig check (bags + large equipment present, by compartment) ---------- */
+function renderRig(vehicleId) {
+  const v = D.vehicle(vehicleId);
+  if (!v) return go('#/inventory');
+  const ag = D.agency(v.agencyId) || {};
+  const key = 'rig.' + v.id;
+  const groups = compGroups(v.id).filter((g) => g.bags.length || g.large.length);
+  const d = getDraft(key);
+  const last = D.lastRig(v.id);
+  setHeader('Full rig check', [ag.name, v.name].filter(Boolean).join(' › '), '#/vehicle/' + encodeURIComponent(v.id));
+  // entries per group, in display order
+  groups.forEach((g) => {
+    g.entries = g.bags.map((b) => ({ key: 'B:' + b.id, kind: 'Bag', id: b.id, name: b.name, qty: 1, comp: g.id ? g.name : '' }))
+      .concat(g.large.map((e) => ({ key: 'E:' + e.id, kind: 'Large equipment', id: e.id, name: e.name, qty: e.qty, notes: e.notes, comp: g.id ? g.name : '' })));
+  });
+  const entries = [].concat.apply([], groups.map((g) => g.entries));
+  const doneN = entries.filter((e) => (d.items[e.key] || {}).status).length;
+  const pct = entries.length ? Math.round(doneN / entries.length * 100) : 0;
+  const row = (e) => {
+    const st = d.items[e.key] || {};
+    const cls = st.status === 'Present' ? 'present' : st.status === 'Damaged' ? 'damaged' : st.status === 'Missing' ? 'missing-explicit' : '';
+    const icon = st.status === 'Present' ? I.check : st.status === 'Damaged' ? I.bang : st.status === 'Missing' ? I.x : '';
+    return '<div class="check-item ' + cls + '">' +
+      '<button class="check-hit" data-act="toggle" data-k="' + esc(e.key) + '"><span class="box">' + icon + '</span><span class="grow">' +
+      '<span class="iname">' + esc(e.name) + '</span>' + (e.qty > 1 ? '<span class="qty">×' + e.qty + '</span>' : '') +
+      ' <span class="kind ' + (e.kind === 'Bag' ? 'kind-bag' : 'kind-eq') + '">' + (e.kind === 'Bag' ? 'Bag' : 'Equipment') + '</span>' +
+      (st.status === 'Damaged' || st.status === 'Missing' ? '<div class="inote">' + esc(st.status) + (st.notes ? ' — ' + esc(st.notes) : '') + '</div>' : st.notes ? '<div class="inote">' + esc(st.notes) + '</div>' : '') +
+      (e.notes ? '<div class="sub muted small">' + esc(e.notes) + '</div>' : '') + '</span></button>' +
+      '<button class="more-btn" data-act="more" data-k="' + esc(e.key) + '" aria-label="Mark missing or damaged, add note">' + I.dots + '</button></div>';
+  };
+  view().innerHTML =
+    '<div class="inspect-time"><span>🕒</span><div class="grow"><div class="small muted">Date / time inspected (auto)</div><strong id="nowClock"></strong></div></div>' +
+    '<div class="card" style="margin-top:10px"><div class="row"><div class="grow small">' +
+    '<div>Is each bag and large item <b>in its compartment</b>? Bag contents are checked separately.</div>' +
+    '<div><span class="muted">Last full rig check:</span> ' + esc(last ? fmtDateTime(last.at) + ' · ' + last.by : 'Never') + '</div></div>' +
+    '<strong>' + pct + '%</strong></div><div class="progress"><i style="width:' + pct + '%"></i></div></div>' +
+    (groups.length ? groups.map((g, gi) => {
+      const gd = g.entries.filter((e) => (d.items[e.key] || {}).status).length;
+      return '<div class="section-title">' + esc(g.name) + ' · ' + gd + '/' + g.entries.length + '<span class="spacer"></span><button class="btn ghost sm" data-act="allc" data-g="' + gi + '">All present</button></div>' +
+        (g.notes ? '<div class="muted small" style="margin:-4px 4px 6px">' + esc(g.notes) + '</div>' : '') +
+        '<div class="list">' + g.entries.map(row).join('') + '</div>';
+    }).join('') : emptyBox('Nothing set up on this vehicle yet. An admin can add compartments, bags and large equipment.')) +
+    '<div class="section-title">Notes</div>' +
+    '<textarea class="input" id="invNotes" placeholder="Anything the next crew or an admin should know">' + esc(d.notes || '') + '</textarea>' +
+    '<div class="row" style="margin-top:14px"><button class="btn sm danger" data-act="reset">Clear this check</button></div>' +
+    '<div class="submit-bar"><div class="inner"><div class="grow small"><strong>' + doneN + ' of ' + entries.length + '</strong> <span class="muted">checked</span></div>' +
+    '<button class="btn primary" data-act="submit"' + (entries.length ? '' : ' disabled') + '>Complete rig check</button></div></div>';
+
+  const tick = () => { const c = $('#nowClock'); if (c) c.textContent = fmtDateTime(new Date().toISOString()); };
+  tick(); S.clock = setInterval(tick, 15000);
+  const rerender = () => { const y = window.scrollY; renderRig(v.id); window.scrollTo(0, y); };
+  const vw = view();
+  vw.onclick = async (ev) => {
+    const el = ev.target.closest('[data-act]');
+    if (!el) return;
+    const act = el.dataset.act, k = el.dataset.k;
+    const dd = getDraft(key);
+    if (act === 'toggle') {
+      const cur = dd.items[k] || {};
+      dd.items[k] = Object.assign({}, cur, { status: cur.status === 'Present' ? '' : 'Present' });
+      putDraft(key, dd); rerender();
+    } else if (act === 'more') {
+      const e = entries.find((x) => x.key === k), cur = dd.items[k] || {};
+      const r = await formModal(e.name, [
+        { name: 'status', label: 'Status', type: 'select', options: ['Present', 'Missing', 'Damaged'], required: true },
+        { name: 'notes', label: 'Note', type: 'textarea', placeholder: e.kind === 'Bag' ? 'e.g. Bag moved to Rescue 2, left at station' : 'e.g. Out for service, damaged handle' }
+      ], { status: cur.status || 'Missing', notes: cur.notes || '' });
+      if (r && r.values) { dd.items[k] = r.values; putDraft(key, dd); rerender(); }
+    } else if (act === 'allc') {
+      groups[+el.dataset.g].entries.forEach((e) => {
+        const c = dd.items[e.key] || {}; if (!c.status) dd.items[e.key] = Object.assign({}, c, { status: 'Present' });
+      });
+      putDraft(key, dd); rerender();
+    } else if (act === 'reset') {
+      if (await confirmModal('Clear this check?', 'All check marks for this full rig check will be cleared.', 'Clear', true)) { LS.del('draft.' + key); rerender(); }
+    } else if (act === 'submit') {
+      submitRig(v, ag, entries, key);
+    }
+  };
+  vw.oninput = (ev) => { if (ev.target.id === 'invNotes') { const dd = getDraft(key); dd.notes = ev.target.value; putDraft(key, dd); } };
+}
+
+async function submitRig(v, ag, entries, key) {
+  const d = getDraft(key);
+  const st = (e) => (d.items[e.key] || {}).status;
+  const unchecked = entries.filter((e) => !st(e));
+  const missing = entries.filter((e) => st(e) === 'Missing').length + unchecked.length;
+  const damaged = entries.filter((e) => st(e) === 'Damaged').length;
+  if (missing || damaged) {
+    const list = unchecked.slice(0, 8).map((e) => esc(e.name)).join(', ') + (unchecked.length > 8 ? '…' : '');
+    const ok = await confirmModal('Submit with problems?',
+      (missing ? '<strong>' + missing + ' will be recorded as MISSING.</strong>' + (unchecked.length ? '<br><span class="small">Not checked: ' + list + '</span>' : '') + '<br>' : '') +
+      (damaged ? '<strong>' + damaged + ' damaged.</strong><br>' : '') +
+      '<span class="small">An alert email will go to you and your agency Lead' + (navigator.onLine ? '.' : ' once this syncs.') + '</span>', 'Submit anyway');
+    if (!ok) return;
+  }
+  const performedAt = new Date().toISOString();
+  const inv = {
+    id: uid('RIG'), type: 'rig', performedAt, agencyId: ag.id || '', vehicleId: v.id, vehicleName: v.name, notes: d.notes || '',
+    items: entries.map((e) => { const x = d.items[e.key] || {}; return { kind: e.kind, itemId: e.id, name: e.name, qty: e.qty, compartment: e.comp, status: x.status || 'Missing', notes: x.notes || '' }; }),
+    ropes: []
+  };
+  S.outbox.push({ by: S.user.email, inv });
+  saveOutbox();
+  LS.del('draft.' + key);
+  S.data.lastRigChecks = S.data.lastRigChecks || {};
+  S.data.lastRigChecks[v.id] = { at: performedAt, by: S.user.name || S.user.email, missing, damaged };
+  LS.set('data', S.data);
+  toast((navigator.onLine ? 'Rig check saved — syncing…' : 'Saved offline — will sync when connected') + (missing || damaged ? ' Alert email will be sent.' : ''), 'good');
+  go('#/vehicle/' + encodeURIComponent(v.id));
+  trySync();
 }
 
 function emptyBox(msg) { return '<div class="list"><div class="empty">' + esc(msg) + '</div></div>'; }
@@ -763,22 +906,98 @@ function adminVehicle(id) {
   if (!v) return go('#/admin');
   const a = D.agency(v.agencyId) || {};
   setHeader(v.name, 'Admin › ' + (a.name || 'Vehicle'), '#/admin/agency/' + encodeURIComponent(a.id || ''));
-  const bags = D.bagsOf(v.id);
+  const bags = D.bagsOf(v.id), comps = D.compartmentsOf(v.id), large = D.largeOf(v.id);
+  const compLabel = (x) => x.compartmentId ? esc(x.compartment) : '<span style="color:var(--warn)">No compartment</span>';
   view().innerHTML =
     '<div class="card"><dl class="kv"><dt>Unit</dt><dd>' + esc(v.unit || '—') + '</dd><dt>Notes</dt><dd>' + esc(v.notes || '—') + '</dd></dl></div>' +
     '<div class="btn-row" style="margin-top:10px"><button class="btn sm" data-act="edit">Edit vehicle</button><button class="btn sm danger" data-act="remove">Remove vehicle</button></div>' +
-    '<div class="section-title">Bags<span class="spacer"></span><button class="btn ghost sm" data-act="add">+ Add bag</button></div>' +
-    (bags.length ? '<div class="list">' + bags.map((b) => '<button class="list-item" data-go="#/admin/bag/' + encodeURIComponent(b.id) + '"><div class="main"><div class="name">' + esc(b.name) + '</div><div class="sub">' + (b.compartment ? esc(b.compartment) + ' · ' : '') + plural(D.itemsOf(b.id).length, 'item') + ' · ' + plural(D.ropesOf(b.id).length, 'rope') + '</div></div>' + I.chev + '</button>').join('') + '</div>' : emptyBox('No bags yet.'));
+
+    '<div class="section-title">Compartments (' + comps.length + ')<span class="spacer"></span><button class="btn ghost sm" data-act="bulkComp">Bulk add</button><button class="btn ghost sm" data-act="addComp">+ Add</button></div>' +
+    (comps.length ? '<div class="list">' + comps.map((c) => {
+      const nb = bags.filter((b) => b.compartmentId === c.id).length, nl = large.filter((e) => e.compartmentId === c.id).length;
+      return '<button class="list-item" data-comp="' + esc(c.id) + '"><div class="main"><div class="name">' + esc(c.name) + '</div><div class="sub">' + plural(nb, 'bag') + ' · ' + plural(nl, 'large item') + (c.notes ? ' · ' + esc(c.notes) : '') + '</div></div><span class="muted small">Edit</span></button>';
+    }).join('') + '</div>' : emptyBox('No compartments yet. Add each storage location on the rig (e.g. D1, P2, Rear bay, Roof box), then assign bags and large equipment to them.')) +
+
+    '<div class="section-title">Bags (' + bags.length + ')<span class="spacer"></span><button class="btn ghost sm" data-act="add">+ Add bag</button></div>' +
+    (bags.length ? '<div class="list">' + bags.map((b) => '<button class="list-item" data-go="#/admin/bag/' + encodeURIComponent(b.id) + '"><div class="main"><div class="name">' + esc(b.name) + '</div><div class="sub">' + compLabel(b) + ' · ' + plural(D.itemsOf(b.id).length, 'item') + ' · ' + plural(D.ropesOf(b.id).length, 'rope') + '</div></div>' + I.chev + '</button>').join('') + '</div>' : emptyBox('No bags yet.')) +
+
+    '<div class="section-title">Large equipment (' + large.length + ')<span class="spacer"></span><button class="btn ghost sm" data-act="bulkLarge">Bulk add</button><button class="btn ghost sm" data-act="addLarge">+ Add</button></div>' +
+    '<div class="muted small" style="margin:-4px 4px 8px">Items stored on the rig outside a bag.</div>' +
+    (large.length ? '<div class="list">' + large.map((e) => '<button class="list-item" data-large="' + esc(e.id) + '"><div class="main"><div class="name">' + esc(e.name) + (e.qty > 1 ? ' <span class="qty">×' + e.qty + '</span>' : '') + '</div><div class="sub">' + compLabel(e) + (e.notes ? ' · ' + esc(e.notes) : '') + '</div></div><span class="muted small">Edit</span></button>').join('') + '</div>'
+      : emptyBox('Items stored loose on the rig — e.g. Stokes basket, tripod, generator, SKED, ladder.')) +
+    '<p class="muted small" style="margin:12px 4px">Compartments, bags and large equipment make up the <b>Full rig check</b>. Bag contents are checked in each bag\'s own inventory.</p>';
   bindGo();
-  const bagFields = [
-    { name: 'Name', label: 'Bag name', required: true, placeholder: 'e.g. Rope Bag A, Rigging Bag, Med Bag' },
-    { name: 'Compartment', label: 'Compartment / location', placeholder: 'e.g. Driver side C3' },
+
+  const compSelect = (hint) => ({ name: 'CompartmentID', label: 'Compartment', type: 'select', options: compOpts(v.id), placeholder: '— No compartment —',
+    hint: comps.length ? hint || '' : 'No compartments on this vehicle yet — add them first to organize the full rig check.' });
+  const parseLines = (txt) => txt.split('\n').map((l) => l.trim()).filter(Boolean).map((l) => {
+    const m = /^(.*?)[,;\t]\s*(\d+)\s*$/.exec(l);
+    return m ? { Name: m[1].trim(), Qty: +m[2] } : { Name: l, Qty: 1 };
+  });
+  const compFields = [
+    { name: 'Name', label: 'Compartment name', required: true, placeholder: 'e.g. D1, Driver side front, Rear bay, Roof box' },
+    { name: 'SortOrder', label: 'Order (optional)', type: 'number', hint: 'Lower numbers come first in the full rig check. Leave blank to sort by name.' },
     { name: 'Notes', label: 'Notes', type: 'textarea' }
   ];
+  const largeFields = [
+    { name: 'Name', label: 'Equipment name', required: true, placeholder: 'e.g. Stokes basket, Arizona Vortex tripod' },
+    { name: 'Qty', label: 'Quantity', type: 'number', default: 1 },
+    compSelect(),
+    { name: 'Notes', label: 'Notes', type: 'textarea', placeholder: 'Serial number, size, mounting location…' }
+  ];
+
+  $('[data-act=addComp]').onclick = async () => {
+    const r = await formModal('New compartment on ' + v.name, compFields);
+    if (r && r.values) adminDo('saveEntity', { type: 'compartment', data: Object.assign({ VehicleID: v.id }, r.values) }, 'Compartment added');
+  };
+  $('[data-act=bulkComp]').onclick = async () => {
+    const r = await formModal('Bulk add compartments', [{ name: 'lines', label: 'One compartment per line, in walk-around order', type: 'textarea', required: true, placeholder: 'D1\nD2\nD3\nP1\nP2\nRear bay\nRoof box' }]);
+    if (!r || !r.values) return;
+    const names = r.values.lines.split('\n').map((l) => l.trim()).filter(Boolean);
+    const base = comps.reduce((m, c) => Math.max(m, c.sort < 9999 ? c.sort : 0), 0);
+    adminDo('bulkAdd', { kind: 'compartment', vehicleId: v.id, startOrder: base + 1, items: names.map((n) => ({ Name: n })) }, plural(names.length, 'compartment') + ' added');
+  };
+  $$('[data-comp]').forEach((el) => el.onclick = async () => {
+    const c = comps.find((x) => x.id === el.dataset.comp);
+    const r = await formModal('Edit compartment', compFields, { Name: c.name, SortOrder: c.sort < 9999 ? c.sort : '', Notes: c.notes }, { danger: 'Remove compartment' });
+    if (!r) return;
+    if (r.danger) {
+      const n = bags.filter((b) => b.compartmentId === c.id).length + large.filter((e) => e.compartmentId === c.id).length;
+      if (await confirmModal('Remove ' + c.name + '?', (n ? n + ' bag(s) / item(s) in it will show as "No compartment" until you reassign them. ' : '') + 'History stays in the sheet.', 'Remove', true))
+        adminDo('removeEntity', { type: 'compartment', id: c.id }, 'Compartment removed');
+    } else adminDo('saveEntity', { type: 'compartment', data: Object.assign({ id: c.id }, r.values) }, 'Saved');
+  });
   $('[data-act=add]').onclick = async () => {
-    const r = await formModal('New bag on ' + v.name, bagFields);
+    const r = await formModal('New bag on ' + v.name, [
+      { name: 'Name', label: 'Bag name', required: true, placeholder: 'e.g. Rope Bag A, Rigging Bag, Med Bag' },
+      compSelect(), { name: 'Notes', label: 'Notes', type: 'textarea' }
+    ]);
     if (r && r.values) adminDo('saveEntity', { type: 'bag', data: Object.assign({ VehicleID: v.id }, r.values) }, 'Bag added');
   };
+  $('[data-act=addLarge]').onclick = async () => {
+    const r = await formModal('Add large equipment to ' + v.name, largeFields);
+    if (r && r.values) adminDo('saveEntity', { type: 'large', data: Object.assign({ VehicleID: v.id }, r.values) }, 'Equipment added');
+  };
+  $('[data-act=bulkLarge]').onclick = async () => {
+    const r = await formModal('Bulk add large equipment', [
+      compSelect('All items below go in this compartment.'),
+      { name: 'lines', label: 'One item per line — add ", qty" for quantity', type: 'textarea', required: true, placeholder: 'Stokes basket\nBackboard, 2\nTripod\nGenerator 5kW' }
+    ]);
+    if (!r || !r.values) return;
+    const lines = parseLines(r.values.lines);
+    adminDo('bulkAdd', { kind: 'large', vehicleId: v.id, compartmentId: r.values.CompartmentID, items: lines }, plural(lines.length, 'item') + ' added');
+  };
+  $$('[data-large]').forEach((el) => el.onclick = async () => {
+    const e = large.find((x) => x.id === el.dataset.large);
+    const vehOpts = (S.data.vehicles || []).map((x) => { const aa = D.agency(x.agencyId); return { value: x.id, label: (aa ? aa.name + ' › ' : '') + x.name }; });
+    const r = await formModal('Edit large equipment', largeFields.concat([{ name: 'VehicleID', label: 'Vehicle (move item)', type: 'select', options: vehOpts, required: true, hint: 'Moving to another vehicle clears the compartment — set it again there.' }]),
+      { Name: e.name, Qty: e.qty, CompartmentID: e.compartmentId, Notes: e.notes, VehicleID: e.vehicleId }, { danger: 'Remove equipment' });
+    if (!r) return;
+    if (r.danger) {
+      if (await confirmModal('Remove ' + e.name + '?', 'It will no longer appear on full rig checks. History stays in the sheet.', 'Remove', true))
+        adminDo('removeEntity', { type: 'large', id: e.id }, 'Removed');
+    } else adminDo('saveEntity', { type: 'large', data: Object.assign({ id: e.id }, r.values) }, 'Saved');
+  });
   $('[data-act=edit]').onclick = async () => {
     const agencyOpts = (S.data.agencies || []).map((x) => ({ value: x.id, label: x.name }));
     const r = await formModal('Edit vehicle', [
@@ -788,7 +1007,7 @@ function adminVehicle(id) {
     if (r && r.values) adminDo('saveEntity', { type: 'vehicle', data: Object.assign({ id: v.id }, r.values) }, 'Saved');
   };
   $('[data-act=remove]').onclick = async () => {
-    if (await confirmModal('Remove ' + v.name + '?', 'The vehicle and its bags will be hidden from the app. History stays in the sheet.', 'Remove', true))
+    if (await confirmModal('Remove ' + v.name + '?', 'The vehicle, its compartments, bags and equipment will be hidden from the app. History stays in the sheet.', 'Remove', true))
       if (await adminDo('removeEntity', { type: 'vehicle', id: v.id }, 'Vehicle removed')) go('#/admin/agency/' + encodeURIComponent(a.id || ''));
   };
 }
@@ -891,9 +1110,12 @@ function adminBag(id) {
   $('[data-act=edit]').onclick = async () => {
     const opts = (S.data.vehicles || []).map((x) => { const aa = D.agency(x.agencyId); return { value: x.id, label: (aa ? aa.name + ' › ' : '') + x.name }; });
     const r = await formModal('Edit bag', [
-      { name: 'Name', label: 'Bag name', required: true }, { name: 'Compartment', label: 'Compartment / location' },
-      { name: 'VehicleID', label: 'Vehicle (move bag)', type: 'select', options: opts, required: true }, { name: 'Notes', label: 'Notes', type: 'textarea' }
-    ], { Name: b.name, Compartment: b.compartment, VehicleID: b.vehicleId, Notes: b.notes });
+      { name: 'Name', label: 'Bag name', required: true },
+      { name: 'CompartmentID', label: 'Compartment', type: 'select', options: compOpts(b.vehicleId), placeholder: '— No compartment —',
+        hint: D.compartmentsOf(b.vehicleId).length ? '' : 'Add compartments on the vehicle\'s admin page first.' },
+      { name: 'VehicleID', label: 'Vehicle (move bag)', type: 'select', options: opts, required: true, hint: 'Moving to another vehicle clears the compartment — set it again there.' },
+      { name: 'Notes', label: 'Notes', type: 'textarea' }
+    ], { Name: b.name, CompartmentID: b.compartmentId, VehicleID: b.vehicleId, Notes: b.notes });
     if (r && r.values) adminDo('saveEntity', { type: 'bag', data: Object.assign({ id: b.id }, r.values) }, 'Bag saved');
   };
   $('[data-act=remove]').onclick = async () => {
@@ -987,7 +1209,7 @@ async function renderReports(tab) {
     body = h.inventories.length ? h.inventories.map((r) =>
       '<div class="report-card"><div class="top"><div class="what">' + esc(r.vehicle) + ' › ' + esc(r.bag) + '</div><div class="when">' + esc(fmtDateTime(r.at)) + '</div></div>' +
       '<div class="small muted">' + esc(r.by) + ' · ' + r.present + '/' + r.total + ' present' + (r.ropes ? ' · ' + plural(r.ropes, 'rope') + ' inspected' : '') + '</div>' +
-      ((r.problems.length || r.ropesDamaged) ? '<ul class="problems">' + r.problems.map((p) => '<li class="badge ' + (p.status === 'Missing' ? 'bad' : 'warn') + '">' + esc(p.status) + ': ' + esc(p.name) + (p.notes ? ' — ' + esc(p.notes) : '') + '</li>').join('') +
+      ((r.problems.length || r.ropesDamaged) ? '<ul class="problems">' + r.problems.map((p) => '<li class="badge ' + (p.status === 'Missing' ? 'bad' : 'warn') + '">' + esc(p.status) + ': ' + esc(p.name) + (p.compartment ? ' [' + esc(p.compartment) + ']' : '') + (p.notes ? ' — ' + esc(p.notes) : '') + '</li>').join('') +
         (r.ropesDamaged ? '<li class="badge bad">' + plural(r.ropesDamaged, 'rope') + ' damaged</li>' : '') + '</ul>' : '<ul class="problems"><li class="badge ok">All present</li></ul>') +
       (r.notes ? '<div class="small" style="margin-top:6px">📝 ' + esc(r.notes) + '</div>' : '') + '</div>').join('') : emptyBox('No inventories yet.');
   } else if (tab === 'attention') {
@@ -997,8 +1219,8 @@ async function renderReports(tab) {
     const probs = Object.values(latestByBag).filter((r) => r.problems.length);
     body = '<div class="section-title">Flagged ropes</div>' +
       (flagged.length ? '<div class="list">' + flagged.map((r) => { const bg = D.bag(r.bagId) || {}; return '<button class="list-item" data-go="#/admin/bag/' + encodeURIComponent(r.bagId) + '"><div class="main"><div class="name">' + esc(r.label) + '</div><div class="sub">' + esc(bg.name || '') + ' · last inspected ' + esc(r.lastInspected ? ago(r.lastInspected) : '—') + '</div></div><span class="badge bad">' + esc(r.status) + '</span></button>'; }).join('') + '</div>' : emptyBox('No ropes flagged.')) +
-      '<div class="section-title">Bags with missing / damaged items (latest check)</div>' +
-      (probs.length ? probs.map((r) => '<div class="report-card"><div class="top"><div class="what">' + esc(r.vehicle) + ' › ' + esc(r.bag) + '</div><div class="when">' + esc(ago(r.at)) + '</div></div><ul class="problems">' + r.problems.map((p) => '<li class="badge ' + (p.status === 'Missing' ? 'bad' : 'warn') + '">' + esc(p.status) + ': ' + esc(p.name) + '</li>').join('') + '</ul></div>').join('') : emptyBox('Everything accounted for on the latest checks.'));
+      '<div class="section-title">Missing / damaged on the latest checks</div>' +
+      (probs.length ? probs.map((r) => '<div class="report-card"><div class="top"><div class="what">' + esc(r.vehicle) + ' › ' + esc(r.bag) + '</div><div class="when">' + esc(ago(r.at)) + '</div></div><ul class="problems">' + r.problems.map((p) => '<li class="badge ' + (p.status === 'Missing' ? 'bad' : 'warn') + '">' + esc(p.status) + ': ' + esc(p.name) + (p.compartment ? ' [' + esc(p.compartment) + ']' : '') + '</li>').join('') + '</ul></div>').join('') : emptyBox('Everything accounted for on the latest checks.'));
   } else {
     body = h.ropeLogs.length ? h.ropeLogs.map((l) =>
       '<div class="report-card"><div class="top"><div class="what">' + esc(l.rope) + '</div><div class="when">' + esc(fmtDateTime(l.at)) + '</div></div>' +
@@ -1027,7 +1249,8 @@ function renderReportBuilder() {
     '<div class="card">' +
     '<div class="field"><span>Report on</span><div class="seg seg-wide">' + scopeBtn('agency', 'Agency') + scopeBtn('vehicle', 'Vehicle') + scopeBtn('bag', 'Bag') + '</div>' +
     '<div class="hint">' + ({ agency: 'Every vehicle and bag in the agency.', vehicle: 'Every bag on one vehicle.', bag: 'One bag.' })[rb.scope] +
-    ' Rope bags include each rope\'s history since it went into service; other bags show Good or their deficiencies.</div></div>' +
+    ' Rope bags include each rope\'s history since it went into service; other bags show Good or their deficiencies.' +
+    (rb.scope !== 'bag' ? ' Each vehicle also shows its latest full rig check (bags and large equipment by compartment).' : '') + '</div></div>' +
     '<label class="field"><span>Agency</span><select class="input" data-rb="agencyId">' + opt(ags, rb.agencyId, (a) => a.name) + '</select></label>' +
     (rb.scope !== 'agency' ? '<label class="field"><span>Vehicle</span><select class="input" data-rb="vehicleId">' + (vs.length ? opt(vs, rb.vehicleId, (v) => v.name + (v.unit ? ' (' + v.unit + ')' : '')) : '<option value="">No vehicles</option>') + '</select></label>' : '') +
     (rb.scope === 'bag' ? '<label class="field"><span>Bag</span><select class="input" data-rb="bagId">' + (bs.length ? opt(bs, rb.bagId, (b) => b.name + (D.ropesOf(b.id).length ? '  — rope bag' : '')) : '<option value="">No bags</option>') + '</select></label>' : '') +
@@ -1112,8 +1335,22 @@ function drawReport(r) {
     (b.ropes.length ? b.ropes.map(ropeBlock).join('') : '') +
     '</div>';
 
-  // group by vehicle (keeps order)
+  const rigBlock = (g) => !g ? '' :
+    '<div class="rpt-bag rpt-rig">' +
+    '<div class="rpt-bag-head"><div><div class="rpt-bag-name">Full rig check</div>' +
+    '<div class="muted small">' + plural(g.compartments, 'compartment') + ' · ' + plural(g.bags, 'bag') + ' · ' + plural(g.large.length, 'large item') + '</div>' +
+    '<div class="muted small">' + (g.lastCheck ? 'Last full rig check ' + esc(fmtDateTime(g.lastCheck.at)) + ' by ' + esc(g.lastCheck.by) + ' · ' + g.lastCheck.present + '/' + g.lastCheck.total + ' present' : 'No full rig check on record') + '</div></div>' +
+    statusBadge(g.status) + '</div>' +
+    (g.status === 'Good' ? '<div class="ok-t small">Every bag and large item was in place on the last full rig check.</div>' : '') +
+    (g.deficiencies.length ? '<div class="rpt-sub">Deficiencies</div><ul class="rpt-list">' + g.deficiencies.map((d) => '<li><span class="' + (d.status === 'Missing' ? 'bad-t' : 'warn-t') + '">' + esc(d.status) + '</span> — ' +
+      '<span class="muted">' + esc(d.kind === 'Bag' ? 'Bag' : 'Equipment') + ':</span> ' + esc(d.name) + (d.qty > 1 ? ' (×' + d.qty + ')' : '') + (d.compartment ? ' <span class="muted">[' + esc(d.compartment) + ']</span>' : '') + (d.notes ? ' <span class="muted">· ' + esc(d.notes) + '</span>' : '') + '</li>').join('') + '</ul>' : '') +
+    (g.lastCheck && g.lastCheck.notes ? '<div class="small" style="margin-top:4px"><span class="muted">Check notes:</span> ' + esc(g.lastCheck.notes) + '</div>' : '') +
+    (g.large.length ? '<div class="rpt-sub">Large equipment on this vehicle</div><div class="small">' + g.large.map((e) => esc(e.name) + (e.qty > 1 ? ' ×' + e.qty : '') + (e.compartment ? ' <span class="muted">(' + esc(e.compartment) + ')</span>' : '')).join(' · ') + '</div>' : '') +
+    '</div>';
+
+  // group by vehicle (keeps order): vehicles with a rig section first, then any others with bags
   const groups = [];
+  (r.rigs || []).forEach((g) => groups.push({ id: g.vehicleId, name: g.vehicle, unit: g.unit, rig: g, bags: [] }));
   r.bags.forEach((b) => { let g = groups.find((x) => x.id === b.vehicleId); if (!g) groups.push(g = { id: b.vehicleId, name: b.vehicle, unit: b.unit, bags: [] }); g.bags.push(b); });
 
   out.innerHTML =
@@ -1128,8 +1365,10 @@ function drawReport(r) {
     '<div class="warn-t"><b>' + sm.never + '</b><span>Never checked</span></div>' +
     '<div><b>' + sm.ropes + '</b><span>Ropes</span></div>' +
     '<div class="' + (sm.ropesFlagged ? 'bad-t' : '') + '"><b>' + sm.ropesFlagged + '</b><span>Ropes flagged</span></div></div>' +
-    (r.bags.length ? groups.map((g) => (r.scope === 'bag' ? '' : '<h3 class="rpt-veh">' + esc(g.name) + (g.unit ? ' <span class="muted">(' + esc(g.unit) + ')</span>' : '') + '</h3>') + g.bags.map(bagBlock).join('')).join('')
-      : '<div class="empty">No bags in this selection.</div>') +
+    (sm.rigs ? '<div class="rpt-rigline">Full rig checks: <b class="ok-t">' + sm.rigGood + ' good</b> · <b class="bad-t">' + sm.rigDeficient + ' deficient</b> · <b class="warn-t">' + sm.rigNever + ' never checked</b></div>' : '') +
+    (groups.length ? groups.map((g) => (r.scope === 'bag' ? '' : '<h3 class="rpt-veh">' + esc(g.name) + (g.unit ? ' <span class="muted">(' + esc(g.unit) + ')</span>' : '') + '</h3>') +
+      rigBlock(g.rig) + (g.bags.length ? (g.rig ? '<div class="rpt-sub" style="margin-top:14px">Bag inventories</div>' : '') + g.bags.map(bagBlock).join('') : '')).join('')
+      : '<div class="empty">Nothing in this selection.</div>') +
     '</div>';
   $('[data-act=print]', out).onclick = () => window.print();
 }
