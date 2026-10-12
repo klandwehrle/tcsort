@@ -1,7 +1,7 @@
 /* SORT Inventory — offline-capable front end. Talks to the Apps Script API in config.js. */
 'use strict';
 
-const APP_VERSION = '1.6.0';
+const APP_VERSION = '1.7.0';
 const API_URL = ((window.APP_CONFIG || {}).API_URL || '').trim();
 
 /* =============================== Storage & state =============================== */
@@ -85,6 +85,7 @@ const I = {
   chart: '<svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><path d="M4 20h16M7 16v-5M12 16V7M17 16v-8" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>',
   user: '<svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><circle cx="12" cy="8.5" r="3.8" fill="none" stroke="currentColor" stroke-width="2"/><path d="M4.5 20c1.2-3.6 4-5.2 7.5-5.2s6.3 1.6 7.5 5.2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
   qr: '<svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M14 14h2.5v2.5H14zM17.5 17.5H20V20h-2.5zM14 18.5h2v1.5h-2zM18.5 14H20v2h-1.5z" fill="currentColor"/></svg>',
+  cal: '<svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15.5" rx="2.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M3.5 10h17M8 3v4M16 3v4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M7.5 13.5h3v3h-3z" fill="currentColor"/></svg>',
   truck: '<svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><path d="M2.5 6.5h11v9h-11zM13.5 9.5h4l3 3.2v2.8h-7z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><circle cx="6.5" cy="17" r="1.8" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="17" cy="17" r="1.8" fill="none" stroke="currentColor" stroke-width="2"/><path d="M5 9h2.5v4H5zM9 9h2.5v4H9z" fill="currentColor"/></svg>',
   scan: '<svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><path d="M4 8V5.5A1.5 1.5 0 015.5 4H8M16 4h2.5A1.5 1.5 0 0120 5.5V8M20 16v2.5a1.5 1.5 0 01-1.5 1.5H16M8 20H5.5A1.5 1.5 0 014 18.5V16M4 12h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
   scanSm: '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M4 8V5.5A1.5 1.5 0 015.5 4H8M16 4h2.5A1.5 1.5 0 0120 5.5V8M20 16v2.5a1.5 1.5 0 01-1.5 1.5H16M8 20H5.5A1.5 1.5 0 014 18.5V16M4 12h16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>',
@@ -353,6 +354,7 @@ function render() {
     case 's': return resolveScan(p1 || '');
     case 'account': return renderAccount();
     case 'share': return renderShare();
+    case 'training': return renderTraining(p1 || '');
     case 'admin':
       if (!isAdmin) return go('#/home');
       if (p1 === 'agency') return adminAgency(p2);
@@ -455,6 +457,7 @@ function renderHome() {
     (pending ? '<div class="card" style="margin-bottom:12px;border-color:var(--warn)"><strong>' + invCount(pending) + ' saved on this device</strong><div class="muted small">They will upload automatically when you are online.</div></div>' : '') +
     '<div class="tiles">' +
     '<button class="tile primary" data-go="#/inventory"><div class="t-icon">' + I.clip + '</div><div><div class="t-name">Inventory</div><div class="t-sub">Check off vehicles, bags &amp; ropes</div></div></button>' +
+    trHomeTile() +
     (isAdmin ?
       '<button class="tile" data-go="#/admin"><div class="t-icon">' + I.gear + '</div><div><div class="t-name">Admin</div><div class="t-sub">Vehicles, compartments, bags, equipment, ropes, users</div></div></button>' +
       '<button class="tile" data-go="#/reports"><div class="t-icon">' + I.chart + '</div><div><div class="t-name">Reports</div><div class="t-sub">Agency, vehicle &amp; bag reports, history, rope logs' + (flagged ? ' · <b style="color:var(--bad)">' + plural(flagged, 'rope') + ' flagged</b>' : '') + '</div></div></button>' : '') +
@@ -467,6 +470,14 @@ function renderHome() {
 
 function bindGo() {
   $$('[data-go]', view()).forEach((el) => el.addEventListener('click', () => go(el.dataset.go)));
+}
+
+function trHomeTile() {
+  const year = trYear(), tot = trTotals(trStatus(S.user.email, year));
+  const sub = tot.total && TR().events.some((e) => e.date.slice(0, 4) === year)
+    ? tot.done + ' of ' + tot.total + ' required selected for ' + year : 'Training calendar &amp; sign-ups';
+  return '<button class="tile" data-go="#/training"><div class="t-icon">' + I.cal + '</div><div class="grow"><div class="t-name">Training</div><div class="t-sub">' + sub + '</div></div>' +
+    (tot.total && tot.done < tot.total && TR().events.some((e) => e.date.slice(0, 4) === year && e.date >= todayStr()) ? '<span class="badge warn">' + (tot.total - tot.done) + ' to pick</span>' : '') + '</button>';
 }
 
 /* ================================ Inventory flow ================================ */
@@ -1559,6 +1570,378 @@ function adminLabels(scope, id) {
     if (k || c) redraw();
   };
   function redraw() { const y = window.scrollY; adminLabels(); window.scrollTo(0, y); }
+}
+
+/* =================================== Training =================================== */
+const TR = () => (S.data && S.data.training) || { types: [], rules: [], events: [] };
+const trType = (t) => TR().types.find((x) => x.type === t) || { type: t, group: '', color: '#546e7a', short: String(t || '').slice(0, 4).toUpperCase() };
+const trGoing = (e, email) => e.attendees.some((a) => a.email === (email || S.user.email));
+const trYear = () => String(new Date().getFullYear());
+function trDate(ymd, opts) {
+  const p = String(ymd).split('-').map(Number);
+  return new Date(p[0], p[1] - 1, p[2]).toLocaleDateString([], opts || { weekday: 'short', month: 'short', day: 'numeric' });
+}
+function fmt12(hhmm) {
+  const p = String(hhmm || '').split(':').map(Number);
+  if (!hhmm || isNaN(p[0])) return hhmm || '';
+  return new Date(2000, 0, 1, p[0], p[1] || 0).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+}
+const trTime = (e) => e.start ? fmt12(e.start) + (e.end ? '–' + fmt12(e.end) : '') : '';
+const trSpots = (e) => e.capacity ? e.attendees.length + '/' + e.capacity + ' signed up' : e.attendees.length + ' signed up';
+
+/** Requirement status for one member and year: one row per rule. */
+function trStatus(email, year) {
+  const t = TR();
+  return t.rules.filter((r) => r.required > 0).map((r) => {
+    const types = t.types.filter((x) => x.group === r.group).map((x) => x.type);
+    const picks = t.events.filter((e) => e.date.slice(0, 4) === year && types.indexOf(e.type) >= 0 && trGoing(e, email));
+    return { rule: r, types, picks, done: picks.length >= r.required };
+  });
+}
+function trTotals(st) {
+  return { done: st.reduce((n, s) => n + Math.min(s.picks.length, s.rule.required), 0), total: st.reduce((n, s) => n + s.rule.required, 0) };
+}
+
+/** Same checks the server makes. '' = can select. */
+function trWhyNot(e) {
+  if (e.date < todayStr()) return 'Already happened';
+  const mine = TR().events.filter((x) => trGoing(x));
+  if (mine.some((x) => x.id === e.id)) return '';
+  if (e.capacity && e.attendees.length >= e.capacity) return 'Full';
+  const same = mine.find((x) => x.date === e.date);
+  if (same) return 'You have ' + same.type + ' that day';
+  const t = trType(e.type), rule = t.group && TR().rules.find((r) => r.group === t.group);
+  if (!rule) return '';
+  const gt = TR().types.filter((x) => x.group === rule.group).map((x) => x.type);
+  const inG = mine.filter((x) => x.date.slice(0, 4) === e.date.slice(0, 4) && gt.indexOf(x.type) >= 0);
+  if (rule.distinct && inG.some((x) => x.type === e.type)) return 'You already have a ' + e.type + ' day — rope days must be different types';
+  if (rule.required && inG.length >= rule.required)
+    return rule.required === 1 ? 'You already picked ' + inG[0].type + ' on ' + trDate(inG[0].date) : 'You already have ' + inG.length + ' ' + rule.group.toLowerCase() + ' (' + inG.map((x) => x.type).join(', ') + ')';
+  return '';
+}
+
+function trTabs(tab) {
+  const isAdmin = S.user && S.user.isAdmin;
+  const t = [['', 'Calendar'], ['mine', 'My trainings']].concat(isAdmin ? [['manage', 'Manage dates'], ['members', 'Member status']] : []);
+  return '<div class="tabs">' + t.map(([k, l]) => '<button data-go="#/training' + (k ? '/' + k : '') + '" class="' + (k === tab ? 'on' : '') + '">' + l + '</button>').join('') + '</div>';
+}
+
+function trReqCard(year, email, opts = {}) {
+  const st = trStatus(email || S.user.email, year), tot = trTotals(st);
+  if (!st.length) return '';
+  if (opts.compact) {
+    return '<div class="card tr-req compact"><div class="row"><div class="grow"><span class="tr-req-title">' + esc(year) + ' required</span> ' +
+      '<span class="muted small">' + tot.done + ' of ' + tot.total + ' selected</span></div>' +
+      '<button class="btn ghost sm" data-reqopen="1">' + (opts.open ? 'Less' : 'Details') + '</button></div>' +
+      (opts.open ? '' : '<div class="tr-pills">' + st.map((s) => '<button class="tr-pill' + (s.done ? ' done' : '') + '" data-filter="g:' + esc(s.rule.group) + '">' +
+        (s.done ? '✓ ' : '') + esc(s.rule.group) + (s.rule.required > 1 ? ' ' + s.picks.length + '/' + s.rule.required : '') + '</button>').join('') + '</div>') +
+      (opts.open ? trReqCard(year, email, { bare: true }) : '') + '</div>';
+  }
+  if (opts.bare) return st.map((s) => trReqRow(s, opts)).join('');
+  return '<div class="card tr-req">' +
+    '<div class="row"><div class="grow"><div class="tr-req-title">' + esc(opts.title || 'Your ' + year + ' required trainings') + '</div>' +
+    '<div class="muted small">' + tot.done + ' of ' + tot.total + ' selected</div></div>' +
+    '<span class="badge ' + (tot.done >= tot.total ? 'ok' : 'warn') + '">' + (tot.done >= tot.total ? '✓ Complete' : (tot.total - tot.done) + ' to pick') + '</span></div>' +
+    '<div class="progress"><i style="width:' + (tot.total ? Math.round(tot.done / tot.total * 100) : 0) + '%"></i></div>' +
+    st.map((s) => trReqRow(s, opts)).join('') +
+    '</div>';
+}
+function trReqRow(s, opts) {
+  return '<button class="tr-req-row" data-filter="g:' + esc(s.rule.group) + '"' + (opts.static ? ' disabled' : '') + '>' +
+    '<span class="tr-req-mark ' + (s.done ? 'on' : '') + '">' + (s.done ? I.check : '') + '</span>' +
+    '<span class="grow"><b>' + esc(s.rule.group) + '</b>' + (s.rule.required > 1 ? ' <span class="muted">' + s.picks.length + '/' + s.rule.required + '</span>' : '') +
+    '<span class="tr-req-sub">' + (s.picks.length ? s.picks.map((e) => esc(e.type) + ' · ' + esc(trDate(e.date))).join(' &nbsp;|&nbsp; ') : '<span style="color:var(--warn)">Pick ' + s.rule.required + (s.rule.distinct ? ' (different types)' : '') + ' — ' + esc(s.types.join(', ')) + '</span>') + '</span></span>' +
+    (opts.static ? '' : I.chev) + '</button>';
+}
+
+function trEventCard(e) {
+  const t = trType(e.type), going = trGoing(e), why = going ? '' : trWhyNot(e), past = e.date < todayStr();
+  return '<div class="tr-ev' + (going ? ' going' : '') + (past ? ' past' : '') + '" style="--c:' + esc(t.color) + '">' +
+    '<button class="tr-ev-main" data-open="' + esc(e.id) + '">' +
+    '<div class="tr-ev-type">' + esc(e.type) + (going ? ' <span class="badge ok">✓ Going</span>' : '') + (t.group ? '' : ' <span class="muted small">optional</span>') + '</div>' +
+    '<div class="tr-ev-when">' + esc(trDate(e.date, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })) + (e.start ? ' · ' + esc(trTime(e)) : '') + '</div>' +
+    '<div class="tr-ev-where">' + (e.location ? esc(e.location) + ' · ' : '') + esc(trSpots(e)) + '</div>' +
+    (why && !past ? '<div class="tr-ev-why">' + esc(why) + '</div>' : '') + '</button>' +
+    (past ? '' : going ? '<button class="btn sm" data-drop="' + esc(e.id) + '">Drop</button>'
+      : '<button class="btn sm primary" data-sel="' + esc(e.id) + '"' + (why ? ' disabled' : '') + '>Select</button>') +
+    '</div>';
+}
+
+async function trDo(action, payload, okMsg) {
+  if (!navigator.onLine) { toast('Signing up needs an internet connection', 'bad'); return null; }
+  try {
+    const res = await api(action, payload);
+    if (res.data) applyData(res.data);
+    if (res.warning) toast('Done — note: ' + res.warning, 'bad'); else if (okMsg) toast(okMsg, 'good');
+    return res;
+  } catch (e) { if (!e.auth) toast(e.message, 'bad'); return null; }
+}
+
+/** Shared click handling for select / drop / open on any training page. */
+function trBind(redraw) {
+  view().onclick = async (ev) => {
+    const g = ev.target.closest('[data-go]');
+    if (g) return;
+    const sel = ev.target.closest('[data-sel]'), drop = ev.target.closest('[data-drop]'), open = ev.target.closest('[data-open]'), flt = ev.target.closest('[data-filter]');
+    if (sel) {
+      const e = TR().events.find((x) => x.id === sel.dataset.sel);
+      sel.disabled = true;
+      if (await trDo('trainingSignup', { eventId: e.id }, 'Signed up: ' + e.type + ' ' + trDate(e.date))) redraw(); else sel.disabled = false;
+    } else if (drop) {
+      const e = TR().events.find((x) => x.id === drop.dataset.drop);
+      if (await confirmModal('Drop ' + e.type + '?', esc(trDate(e.date, { weekday: 'long', month: 'long', day: 'numeric' })) + ' — your spot will open up for someone else.', 'Drop'))
+        if (await trDo('trainingDrop', { eventId: e.id }, 'Dropped')) redraw();
+    } else if (open) {
+      trEventModal(open.dataset.open, redraw);
+    } else if (flt && redraw.filter) {
+      redraw.filter(flt.dataset.filter);
+    }
+  };
+}
+
+function trEventModal(id, redraw) {
+  const e = TR().events.find((x) => x.id === id);
+  if (!e) return;
+  const t = trType(e.type), going = trGoing(e), why = going ? '' : trWhyNot(e), past = e.date < todayStr(), isAdmin = S.user.isAdmin;
+  const rule = t.group && TR().rules.find((r) => r.group === t.group);
+  const bd = openModal(
+    '<div class="tr-modal-type" style="--c:' + esc(t.color) + '">' + esc(e.type) + '</div>' +
+    '<h3 style="margin-top:4px">' + esc(trDate(e.date, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })) + '</h3>' +
+    '<div class="card"><dl class="kv">' +
+    '<dt>Time</dt><dd>' + esc(trTime(e) || '—') + '</dd><dt>Location</dt><dd>' + esc(e.location || '—') + '</dd>' +
+    '<dt>Spots</dt><dd>' + esc(e.capacity ? e.attendees.length + ' of ' + e.capacity + ' taken' : e.attendees.length + ' signed up (no limit)') + '</dd>' +
+    '<dt>Counts for</dt><dd>' + esc(rule ? rule.group + ' requirement' : 'Optional') + '</dd>' +
+    (e.notes ? '<dt>Notes</dt><dd>' + esc(e.notes) + '</dd>' : '') + '</dl></div>' +
+    '<div class="section-title">Who\'s going (' + e.attendees.length + ')' + (isAdmin ? '<span class="spacer"></span><button class="btn ghost sm" data-m="add">+ Add member</button>' : '') + '</div>' +
+    '<div class="list">' + (e.attendees.length ? e.attendees.map((a) => '<div class="list-item" style="min-height:48px"><div class="main"><div class="name" style="font-weight:500">' + esc(a.name || a.email) + (a.email === S.user.email ? ' <span class="muted">(you)</span>' : '') + '</div></div>' +
+      (isAdmin ? '<button class="btn sm ghost" data-m="rm" data-email="' + esc(a.email) + '" aria-label="Remove">' + I.x + '</button>' : '') + '</div>').join('') : '<div class="empty">No one yet.</div>') + '</div>' +
+    (why && !past ? '<div class="error-box" style="margin:12px 0 0">' + esc(why) + '</div>' : '') +
+    '<div class="btn-row" style="margin-top:14px"><button class="btn" data-m="close">Close</button>' +
+    (past ? '' : going ? '<button class="btn" data-m="drop">Drop</button>' : '<button class="btn primary" data-m="sel"' + (why ? ' disabled' : '') + '>Select</button>') + '</div>' +
+    (isAdmin ? '<div class="btn-row" style="margin-top:8px"><button class="btn sm" data-m="edit">Edit training</button><button class="btn sm danger" data-m="remove">Remove training</button></div>' : ''));
+  bd.addEventListener('click', async (ev) => {
+    const m = ev.target.closest('[data-m]');
+    if (ev.target === bd || (m && m.dataset.m === 'close')) return closeModal();
+    if (!m) return;
+    const act = m.dataset.m;
+    if (act === 'sel') { closeModal(); if (await trDo('trainingSignup', { eventId: e.id }, 'Signed up: ' + e.type + ' ' + trDate(e.date))) redraw(); }
+    else if (act === 'drop') { closeModal(); if (await trDo('trainingDrop', { eventId: e.id }, 'Dropped')) redraw(); }
+    else if (act === 'edit') { closeModal(); trEditEvent(e, redraw); }
+    else if (act === 'remove') {
+      closeModal();
+      if (await confirmModal('Remove ' + e.type + ' on ' + trDate(e.date) + '?', (e.attendees.length ? e.attendees.length + ' member(s) are signed up and will lose this training. ' : '') + 'History stays in the sheet.', 'Remove', true))
+        if (await trDo('removeEntity', { type: 'training', id: e.id }, 'Training removed')) redraw();
+    } else if (act === 'rm') {
+      const email = m.dataset.email, a = e.attendees.find((x) => x.email === email);
+      closeModal();
+      if (await confirmModal('Remove ' + (a.name || email) + '?', 'From ' + e.type + ' on ' + trDate(e.date) + '.', 'Remove', true))
+        if (await trDo('trainingAdminDrop', { eventId: e.id, email }, 'Removed')) { redraw(); trEventModal(e.id, redraw); }
+    } else if (act === 'add') {
+      closeModal();
+      let users;
+      try { users = (await api('listUsers')).users.filter((u) => u.active && !trGoing(e, u.email)); } catch (err) { return toast(err.message, 'bad'); }
+      if (!users.length) return toast('Everyone is already signed up');
+      users.sort((x, y) => (x.lastName || x.name).localeCompare(y.lastName || y.name));
+      const r = await formModal('Add member to ' + e.type, [{ name: 'email', label: 'Member', type: 'select', required: true, placeholder: 'Choose…',
+        options: users.map((u) => ({ value: u.email, label: (u.lastName ? u.lastName + ', ' + u.firstName : u.name || u.email) })) }],
+        {}, { submit: 'Add', intro: 'Admins can add a member even if it breaks a rule (you\'ll see a note if it does).' });
+      if (r && r.values && await trDo('trainingAdminAdd', { eventId: e.id, email: r.values.email }, 'Member added')) { redraw(); trEventModal(e.id, redraw); }
+    }
+  });
+}
+
+function trEventFields(defaults = {}) {
+  return [
+    { name: 'Type', label: 'Training', type: 'select', required: true, placeholder: 'Choose…', options: TR().types.map((t) => t.type) },
+    { name: 'Date', label: 'Date', type: 'date', required: true },
+    { name: 'StartTime', label: 'Start time', type: 'time' },
+    { name: 'EndTime', label: 'End time', type: 'time' },
+    { name: 'Location', label: 'Location', placeholder: 'e.g. Station 1, Training Center' },
+    { name: 'Capacity', label: 'Spots available (optional)', type: 'number', hint: 'Leave blank for no limit.' },
+    { name: 'Notes', label: 'Notes', type: 'textarea', placeholder: 'What to bring, instructor, meeting point…' }
+  ];
+}
+
+async function trEditEvent(e, redraw) {
+  const r = await formModal(e ? 'Edit training' : 'Add training', trEventFields(),
+    e ? { Type: e.type, Date: e.date, StartTime: e.start, EndTime: e.end, Location: e.location, Capacity: e.capacity || '', Notes: e.notes } : {});
+  if (!r || !r.values) return;
+  if (await trDo('saveEntity', { type: 'training', data: Object.assign(e ? { id: e.id } : {}, r.values) }, e ? 'Training saved' : 'Training added')) redraw();
+}
+
+function parseDates(text, year) {
+  const ok = [], bad = [];
+  text.split(/[\n,;]+/).map((x) => x.trim()).filter(Boolean).forEach((x) => {
+    let m, y, mo, d;
+    if ((m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(x))) { y = +m[1]; mo = +m[2]; d = +m[3]; }
+    else if ((m = /^(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?$/.exec(x))) { mo = +m[1]; d = +m[2]; y = m[3] ? (+m[3] < 100 ? 2000 + +m[3] : +m[3]) : +year; }
+    const dt = y && new Date(y, mo - 1, d);
+    if (dt && dt.getMonth() === mo - 1 && dt.getDate() === d) ok.push(y + '-' + pad(mo) + '-' + pad(d)); else bad.push(x);
+  });
+  return { ok, bad };
+}
+
+/* ---------- Calendar ---------- */
+function renderTraining(tab) {
+  setHeader('Training', tab === 'mine' ? 'My trainings' : tab === 'manage' ? 'Manage dates' : tab === 'members' ? 'Member status' : 'Calendar', '#/home');
+  if (tab === 'mine') return trMine();
+  if (tab === 'manage') return S.user.isAdmin ? trManage() : go('#/training');
+  if (tab === 'members') return S.user.isAdmin ? trMembers() : go('#/training');
+  return trCalendar();
+}
+
+function trCalendar() {
+  const st = S.tr || (S.tr = { month: todayStr().slice(0, 7), filter: '', day: '' });
+  const [Y, Mo] = st.month.split('-').map(Number);
+  const year = String(Y);
+  const match = (e) => !st.filter || (st.filter.indexOf('g:') === 0 ? trType(e.type).group === st.filter.slice(2) : e.type === st.filter);
+  const events = TR().events.filter(match);
+  const first = new Date(Y, Mo - 1, 1), days = new Date(Y, Mo, 0).getDate(), lead = first.getDay();
+  const byDay = {};
+  events.forEach((e) => { if (e.date.slice(0, 7) === st.month) (byDay[e.date] = byDay[e.date] || []).push(e); });
+  let cells = '';
+  for (let i = 0; i < lead; i++) cells += '<div class="cal-day blank"></div>';
+  for (let d = 1; d <= days; d++) {
+    const ymd = st.month + '-' + pad(d), list = byDay[ymd] || [];
+    cells += '<button class="cal-day' + (ymd === todayStr() ? ' today' : '') + (ymd === st.day ? ' sel' : '') + (list.length ? ' has' : '') + (ymd < todayStr() ? ' pastday' : '') + '" data-day="' + ymd + '">' +
+      '<span class="n">' + d + '</span><span class="chips">' +
+      list.slice(0, 2).map((e) => '<i class="chip' + (trGoing(e) ? ' mine' : '') + '" style="--c:' + esc(trType(e.type).color) + '">' + esc(trType(e.type).short) + '</i>').join('') +
+      (list.length > 2 ? '<i class="chip more">+' + (list.length - 2) + '</i>' : '') + '</span></button>';
+  }
+  const fLabel = st.filter ? (st.filter.indexOf('g:') === 0 ? st.filter.slice(2) : st.filter) : '';
+  let listTitle, list;
+  if (st.filter) { list = events.filter((e) => e.date.slice(0, 4) === year); listTitle = 'All ' + fLabel + ' dates in ' + year; }
+  else if (st.day) { list = byDay[st.day] || []; listTitle = trDate(st.day, { weekday: 'long', month: 'long', day: 'numeric' }); }
+  else { list = events.filter((e) => e.date.slice(0, 7) === st.month); listTitle = first.toLocaleDateString([], { month: 'long', year: 'numeric' }); }
+  const hasYear = TR().events.some((e) => e.date.slice(0, 4) === year);
+  view().innerHTML = trTabs('') +
+    trReqCard(year, null, { compact: true, open: st.reqOpen }) +
+    '<div class="tr-filters">' +
+    '<button class="tr-f' + (!st.filter ? ' on' : '') + '" data-filter="">All</button>' +
+    (st.filter.indexOf('g:') === 0 ? '<button class="tr-f on" data-filter="">' + esc(fLabel) + ' ✕</button>' : '') +
+    TR().types.map((t) => '<button class="tr-f' + (st.filter === t.type ? ' on' : '') + '" data-filter="' + esc(t.type) + '" style="--c:' + esc(t.color) + '"><i></i>' + esc(t.type) + '</button>').join('') + '</div>' +
+    '<div class="cal"><div class="cal-head"><button class="icon-btn" data-mon="-1" aria-label="Previous month">‹</button>' +
+    '<div class="cal-title">' + esc(first.toLocaleDateString([], { month: 'long', year: 'numeric' })) + '</div>' +
+    '<button class="icon-btn" data-mon="1" aria-label="Next month">›</button></div>' +
+    '<div class="cal-grid">' + ['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((x) => '<div class="cal-dow">' + x + '</div>').join('') + cells + '</div>' +
+    '<div class="cal-legend"><span><i class="chip mine" style="--c:#555">ABC</i> you\'re going</span><span><i class="chip" style="--c:#555">ABC</i> open</span>' +
+    (st.month !== todayStr().slice(0, 7) ? '<button class="btn ghost sm" data-mon="0">Today</button>' : '') + '</div></div>' +
+    '<div class="section-title">' + esc(listTitle) + (st.day && !st.filter ? '<span class="spacer"></span><button class="btn ghost sm" data-clearday="1">Whole month</button>' : '') + '</div>' +
+    (list.length ? list.map(trEventCard).join('') : emptyBox(hasYear || st.filter ? 'No trainings ' + (st.day ? 'this day' : st.filter ? 'of this type in ' + year : 'this month') + '.' : 'No ' + year + ' training dates yet. Admins add the year\'s dates in January.'));
+  bindGo();
+  const redraw = () => { const y = window.scrollY; trCalendar(); window.scrollTo(0, y); };
+  redraw.filter = (f) => { st.filter = f; st.day = ''; redraw(); };
+  trBind(redraw);
+  const base = view().onclick;
+  view().onclick = (ev) => {
+    const mon = ev.target.closest('[data-mon]'), day = ev.target.closest('[data-day]'), clr = ev.target.closest('[data-clearday]');
+    if (ev.target.closest('[data-reqopen]')) { st.reqOpen = !st.reqOpen; return redraw(); }
+    if (mon) {
+      const k = +mon.dataset.mon;
+      if (!k) st.month = todayStr().slice(0, 7);
+      else { const dt = new Date(Y, Mo - 1 + k, 1); st.month = dt.getFullYear() + '-' + pad(dt.getMonth() + 1); }
+      st.day = ''; return redraw();
+    }
+    if (day) { st.day = st.day === day.dataset.day ? '' : day.dataset.day; if (st.day) st.filter = ''; return redraw(); }
+    if (clr) { st.day = ''; return redraw(); }
+    return base(ev);
+  };
+}
+
+/* ---------- My trainings ---------- */
+function trMine() {
+  const year = (S.trYear = S.trYear || trYear());
+  const mine = TR().events.filter((e) => e.date.slice(0, 4) === year && trGoing(e));
+  const up = mine.filter((e) => e.date >= todayStr()), past = mine.filter((e) => e.date < todayStr()).reverse();
+  view().innerHTML = trTabs('mine') + trYearNav(year) +
+    trReqCard(year, null, { static: true }) +
+    '<div class="section-title">Upcoming (' + up.length + ')</div>' + (up.length ? up.map(trEventCard).join('') : emptyBox('Nothing upcoming. Use the Calendar to pick your trainings.')) +
+    (past.length ? '<div class="section-title">Completed / past (' + past.length + ')</div>' + past.map(trEventCard).join('') : '') +
+    '<button class="btn block" style="margin-top:16px" data-go="#/training">Open calendar to pick trainings</button>';
+  bindGo();
+  const redraw = () => trMine();
+  trBind(redraw);
+  trYearBind(redraw);
+}
+
+function trYearNav(year) {
+  return '<div class="tr-yearnav"><button class="icon-btn" data-yr="-1" aria-label="Previous year">‹</button><b>' + esc(year) + '</b><button class="icon-btn" data-yr="1" aria-label="Next year">›</button></div>';
+}
+function trYearBind(redraw) {
+  const base = view().onclick;
+  view().onclick = (ev) => {
+    const y = ev.target.closest('[data-yr]');
+    if (y) { S.trYear = String(+S.trYear + +y.dataset.yr); return redraw(); }
+    return base && base(ev);
+  };
+}
+
+/* ---------- Admin: manage dates ---------- */
+function trManage() {
+  const year = (S.trYear = S.trYear || trYear());
+  const evs = TR().events.filter((e) => e.date.slice(0, 4) === year);
+  const months = {};
+  evs.forEach((e) => { (months[e.date.slice(0, 7)] = months[e.date.slice(0, 7)] || []).push(e); });
+  const counts = TR().types.map((t) => ({ t, n: evs.filter((e) => e.type === t.type).length }));
+  view().innerHTML = trTabs('manage') + trYearNav(year) +
+    '<div class="btn-row"><button class="btn primary grow" data-act="add">+ Add training</button><button class="btn grow" data-act="bulk">Add several dates</button></div>' +
+    '<div class="card small" style="margin-top:12px"><b>' + evs.length + ' trainings in ' + esc(year) + '</b><div class="tr-counts">' +
+    counts.map((c) => '<span class="' + (c.n ? '' : 'muted') + '"><i style="background:' + esc(c.t.color) + '"></i>' + esc(c.t.type) + ' ' + c.n + '</span>').join('') + '</div></div>' +
+    (evs.length ? Object.keys(months).sort().map((k) => '<div class="section-title">' + esc(trDate(k + '-01', { month: 'long', year: 'numeric' })) + '</div><div class="list">' +
+      months[k].map((e) => '<button class="list-item" data-open="' + esc(e.id) + '"><span class="tr-bar" style="background:' + esc(trType(e.type).color) + '"></span><div class="main"><div class="name">' + esc(e.type) + '</div>' +
+        '<div class="sub">' + esc(trDate(e.date)) + (e.start ? ' · ' + esc(trTime(e)) : '') + (e.location ? ' · ' + esc(e.location) : '') + '</div></div>' +
+        '<span class="badge' + (e.capacity && e.attendees.length >= e.capacity ? ' bad' : '') + '">' + esc(e.capacity ? e.attendees.length + '/' + e.capacity : String(e.attendees.length)) + '</span></button>').join('') + '</div>').join('')
+      : emptyBox('No trainings for ' + year + ' yet. In January, add the year\'s dates here — "Add several dates" lets you enter every date for one training type at once.')) +
+    '<p class="muted small" style="margin:14px 4px">Training types and the yearly requirements live in the <b>TrainingTypes</b> and <b>TrainingRules</b> tabs of the sheet (e.g. change "Rope days" Required from 2 to 3).</p>';
+  bindGo();
+  const redraw = () => { const y = window.scrollY; trManage(); window.scrollTo(0, y); };
+  trBind(redraw);
+  trYearBind(redraw);
+  $('[data-act=add]').onclick = () => trEditEvent(null, redraw);
+  $('[data-act=bulk]').onclick = async () => {
+    const f = trEventFields().filter((x) => x.name !== 'Date');
+    f.splice(1, 0, { name: 'dates', label: 'Dates — one per line', type: 'textarea', required: true, placeholder: '3/6\n4/10/' + year + '\n' + year + '-09-11', hint: 'Month/day uses ' + year + ' unless you add the year. All dates get the same time, location and spots.' });
+    const r = await formModal('Add several dates', f, {}, { submit: 'Add dates', validate: (v) => { const p = parseDates(v.dates, year); return p.bad.length ? 'Can\'t read: ' + p.bad.join(', ') : !p.ok.length ? 'Enter at least one date.' : ''; } });
+    if (!r || !r.values) return;
+    const v = r.values, p = parseDates(v.dates, year);
+    if (await trDo('bulkAddTraining', { type: v.Type, dates: p.ok, start: v.StartTime, end: v.EndTime, location: v.Location, capacity: v.Capacity, notes: v.Notes }, plural(p.ok.length, v.Type + ' date') + ' added')) redraw();
+  };
+}
+
+/* ---------- Admin: member status ---------- */
+async function trMembers() {
+  const year = (S.trYear = S.trYear || trYear());
+  view().innerHTML = trTabs('members') + trYearNav(year) + '<div class="spinner"></div>';
+  bindGo();
+  trBind(() => trMembers()); trYearBind(() => trMembers());
+  let users;
+  try { users = (await api('listUsers')).users.filter((u) => u.active); } catch (e) { view().innerHTML = trTabs('members') + emptyBox(e.message); bindGo(); return; }
+  if (S.route[0] !== 'training' || S.route[1] !== 'members') return;
+  const rows = users.map((u) => { const st = trStatus(u.email, year); return { u, st, tot: trTotals(st) }; })
+    .sort((a, b) => (a.tot.done >= a.tot.total) - (b.tot.done >= b.tot.total) || (a.u.lastName || a.u.name).localeCompare(b.u.lastName || b.u.name));
+  const complete = rows.filter((r) => r.tot.done >= r.tot.total).length;
+  view().innerHTML = trTabs('members') + trYearNav(year) +
+    '<div class="card"><b>' + complete + ' of ' + rows.length + ' members</b> have selected all required ' + esc(year) + ' trainings.</div>' +
+    '<div class="list" style="margin-top:12px">' + rows.map((r, i) => {
+      const missing = r.st.filter((s) => !s.done).map((s) => s.rule.group + (s.rule.required > 1 ? ' (' + s.picks.length + '/' + s.rule.required + ')' : ''));
+      return '<button class="list-item" data-mem="' + i + '"><div class="main"><div class="name">' + esc(r.u.lastName ? r.u.lastName + ', ' + r.u.firstName : r.u.name || r.u.email) + '</div>' +
+        '<div class="sub">' + (missing.length ? '<span style="color:var(--warn)">Needs: ' + esc(missing.join(', ')) + '</span>' : 'All required trainings selected') + '</div></div>' +
+        '<span class="badge ' + (missing.length ? 'warn' : 'ok') + '">' + r.tot.done + '/' + r.tot.total + '</span></button>';
+    }).join('') + '</div>';
+  bindGo();
+  trBind(() => trMembers()); trYearBind(() => trMembers());
+  const base = view().onclick;
+  view().onclick = (ev) => {
+    const m = ev.target.closest('[data-mem]');
+    if (!m) return base(ev);
+    const r = rows[+m.dataset.mem];
+    const all = TR().events.filter((e) => e.date.slice(0, 4) === year && trGoing(e, r.u.email));
+    const bd = openModal('<h3>' + esc(r.u.name || r.u.email) + ' — ' + esc(year) + '</h3>' + trReqCard(year, r.u.email, { static: true, title: 'Required trainings' }) +
+      '<div class="section-title">All selected (' + all.length + ')</div><div class="list">' + (all.length ? all.map((e) => '<div class="list-item"><span class="tr-bar" style="background:' + esc(trType(e.type).color) + '"></span><div class="main"><div class="name">' + esc(e.type) + '</div><div class="sub">' + esc(trDate(e.date)) + '</div></div></div>').join('') : '<div class="empty">Nothing selected.</div>') + '</div>' +
+      '<p class="muted small">To add or remove this member, open the training on the calendar or in Manage dates.</p>' +
+      '<div class="btn-row"><button class="btn" data-m="x">Close</button></div>');
+    bd.addEventListener('click', (e2) => { if (e2.target === bd || e2.target.closest('[data-m]')) closeModal(); });
+  };
 }
 
 /* ================================== Share app ================================== */
