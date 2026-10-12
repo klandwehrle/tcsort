@@ -1,6 +1,6 @@
 // Service worker: keeps the app shell available offline.
 // Bump CACHE when you change any app file so phones pick up the update.
-const CACHE = 'sort-inventory-v6';
+const CACHE = 'sort-inventory-v7';
 const ASSETS = ['./', './index.html', './styles.css', './app.js', './config.js', './qrcode.js',
                 './manifest.json', './icon-192.png', './icon-512.png'];
 

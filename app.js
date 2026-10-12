@@ -1,7 +1,7 @@
 /* SORT Inventory — offline-capable front end. Talks to the Apps Script API in config.js. */
 'use strict';
 
-const APP_VERSION = '1.5.0';
+const APP_VERSION = '1.6.0';
 const API_URL = ((window.APP_CONFIG || {}).API_URL || '').trim();
 
 /* =============================== Storage & state =============================== */
@@ -119,6 +119,22 @@ function compGroups(vehicleId) {
 }
 const compOpts = (vehicleId) => D.compartmentsOf(vehicleId).map((c) => ({ value: c.id, label: c.name }));
 const ropeFlagged = (r) => r.status === 'Damaged - Review' || r.status === 'Out of Service';
+/** Rope has an open damage report: flagged, or damage found on its most recent inspection. */
+const ropeDamageOpen = (r) => !!r.lastDamage && (ropeFlagged(r) || r.lastInspectionDamage);
+const probIndex = (last) => { const m = {}; ((last && last.problems) || []).forEach((p) => { m[p.itemId] = p; }); return m; };
+const prevTag = (p) => !p ? '' : '<div class="prev ' + (p.status === 'Missing' ? 'prev-bad' : 'prev-warn') + '">⚠ Last check: ' + esc(p.status) + (p.notes ? ' — ' + esc(p.notes) : '') + '</div>';
+
+/** "Last check found" card shown at the top of a check. */
+function prevCard(last, probs, ropeIssues) {
+  if (!probs.length && !ropeIssues.length) return '';
+  return '<div class="card prev-card"><div class="prev-head">⚠ Last check found' +
+    (last ? ' <span class="muted small" style="font-weight:500">· ' + esc(fmtDateTime(last.at)) + ' by ' + esc(last.by) + '</span>' : '') + '</div>' +
+    '<ul class="prev-list">' +
+    probs.map((p) => '<li><span class="' + (p.status === 'Missing' ? 'bad-t' : 'warn-t') + '">' + esc(p.status) + '</span> — ' + esc(p.name) + (p.notes ? ' <span class="muted">· ' + esc(p.notes) + '</span>' : '') + '</li>').join('') +
+    ropeIssues.map((r) => '<li><span class="bad-t">Rope damage</span> — ' + esc(r.label) + ': ' + esc(r.lastDamage.notes || 'No description') +
+      ' <span class="muted">· ' + esc(fmtDate(r.lastDamage.at)) + (r.lastDamage.by ? ', ' + esc(r.lastDamage.by) : '') + (ropeFlagged(r) ? ' · ' + esc(r.status) : '') + '</span></li>').join('') +
+    '</ul><div class="muted small">Check these closely and mark them again if the problem is still there.</div></div>';
+}
 
 /* ===================================== API ===================================== */
 async function api(action, payload = {}, opts = {}) {
@@ -550,11 +566,14 @@ function renderRig(vehicleId) {
       '<span class="iname">' + esc(e.name) + '</span>' + (e.qty > 1 ? '<span class="qty">×' + e.qty + '</span>' : '') +
       ' <span class="kind ' + (e.kind === 'Bag' ? 'kind-bag' : 'kind-eq') + '">' + (e.kind === 'Bag' ? 'Bag' : 'Equipment') + '</span>' +
       (st.status === 'Damaged' || st.status === 'Missing' ? '<div class="inote">' + esc(st.status) + (st.notes ? ' — ' + esc(st.notes) : '') + '</div>' : st.notes ? '<div class="inote">' + esc(st.notes) + '</div>' : '') +
+      prevTag(prev[e.id]) +
       (e.notes ? '<div class="sub muted small">' + esc(e.notes) + '</div>' : '') + '</span></button>' +
       '<button class="more-btn" data-act="more" data-k="' + esc(e.key) + '" aria-label="Mark missing or damaged, add note">' + I.dots + '</button></div>';
   };
+  const prev = probIndex(last);
   view().innerHTML =
     '<div class="inspect-time"><span>🕒</span><div class="grow"><div class="small muted">Date / time inspected (auto)</div><strong id="nowClock"></strong></div></div>' +
+    prevCard(last, (last && last.problems) || [], []) +
     '<div class="card" style="margin-top:10px"><div class="row"><div class="grow small">' +
     '<div>Is each bag and large item <b>in its compartment</b>? Bag contents are checked separately.</div>' +
     '<div><span class="muted">Last full rig check:</span> ' + esc(last ? fmtDateTime(last.at) + ' · ' + last.by : 'Never') + '</div></div>' +
@@ -629,7 +648,8 @@ async function submitRig(v, ag, entries, key) {
   saveOutbox();
   LS.del('draft.' + key);
   S.data.lastRigChecks = S.data.lastRigChecks || {};
-  S.data.lastRigChecks[v.id] = { at: performedAt, by: S.user.name || S.user.email, missing, damaged };
+  S.data.lastRigChecks[v.id] = { at: performedAt, by: S.user.name || S.user.email, missing, damaged,
+    problems: inv.items.filter((i) => i.status !== 'Present').map((i) => ({ itemId: i.itemId, name: i.name, status: i.status, notes: i.notes })) };
   LS.set('data', S.data);
   toast((navigator.onLine ? 'Rig check saved — syncing…' : 'Saved offline — will sync when connected') + (missing || damaged ? ' Alert email will be sent.' : ''), 'good');
   go('#/vehicle/' + encodeURIComponent(v.id));
@@ -669,9 +689,12 @@ function renderCheck(bagId, focusRope) {
       '<button class="check-hit" data-act="toggle" data-id="' + esc(it.id) + '" aria-pressed="' + (st.status === 'Present') + '">' +
       '<span class="box">' + icon + '</span><span class="grow"><span class="iname">' + esc(it.name) + '</span>' + (it.qty > 1 ? '<span class="qty">×' + it.qty + '</span>' : '') +
       (st.status === 'Damaged' || st.status === 'Missing' ? '<div class="inote">' + esc(st.status) + (st.notes ? ' — ' + esc(st.notes) : '') + '</div>' : st.notes ? '<div class="inote">' + esc(st.notes) + '</div>' : '') +
+      prevTag(prev[it.id]) +
       (it.notes ? '<div class="sub muted small">' + esc(it.notes) + '</div>' : '') + '</span></button>' +
       '<button class="more-btn" data-act="more" data-id="' + esc(it.id) + '" aria-label="Mark missing or damaged, add note">' + I.dots + '</button></div>';
   };
+  const prev = probIndex(last);
+  const ropeIssues = ropes.filter(ropeDamageOpen);
 
   const ropeCard = (r) => {
     const rd = d.ropes[r.id] || {};
@@ -681,6 +704,7 @@ function renderCheck(bagId, focusRope) {
       '<div class="muted small">' + esc([r.type, r.length, r.color].filter(Boolean).join(' · ')) + '</div>' +
       '<div class="muted small">Uses logged: ' + r.uses + (r.lastUsed ? ' · last used ' + esc(fmtDate(r.lastUsed)) : '') + (r.inServiceDate ? ' · in service ' + esc(fmtDate(r.inServiceDate)) : '') + '</div></div>' +
       (ropeFlagged(r) ? '<span class="badge bad">' + esc(r.status) + '</span>' : '') + '</div>' +
+      (ropeDamageOpen(r) ? '<div class="prev prev-bad" style="margin:-2px 0 8px">⚠ Damage reported ' + esc(fmtDate(r.lastDamage.at)) + (r.lastDamage.by ? ' by ' + esc(r.lastDamage.by) : '') + ': ' + esc(r.lastDamage.notes || 'No description') + '</div>' : '') +
       '<div class="rope-q"><label>Used since last inspection?</label>' + seg('used', r.id, rd.used || 'No', false) + '</div>' +
       (rd.used === 'Yes' ? '<div class="rope-sub">' +
         '<label class="field"><span>Date used *</span><input class="input" type="date" data-rin="dateUsed" data-id="' + esc(r.id) + '" value="' + esc(rd.dateUsed || '') + '" max="' + todayStr() + '"></label>' +
@@ -694,6 +718,7 @@ function renderCheck(bagId, focusRope) {
 
   view().innerHTML =
     '<div class="inspect-time"><span>🕒</span><div class="grow"><div class="small muted">Date / time inspected (auto)</div><strong id="nowClock"></strong></div></div>' +
+    prevCard(last, (last && last.problems) || [], ropeIssues) +
     '<div class="card" style="margin-top:10px"><div class="row"><div class="grow small">' +
     (bag.compartment ? '<div><span class="muted">Compartment:</span> ' + esc(bag.compartment) + '</div>' : '') +
     '<div><span class="muted">Last check:</span> ' + esc(last ? fmtDateTime(last.at) + ' · ' + last.by : 'Never') + '</div></div>' +
@@ -816,11 +841,13 @@ async function submitCheck(bag, veh, ag, items, ropes) {
   LS.del('draft.' + bag.id);
   // Optimistic local updates so the lists reflect the check right away (also offline)
   S.data.lastChecks = S.data.lastChecks || {};
-  S.data.lastChecks[bag.id] = { at: performedAt, by: S.user.name || S.user.email, missing, damaged };
+  S.data.lastChecks[bag.id] = { at: performedAt, by: S.user.name || S.user.email, missing, damaged,
+    problems: inv.items.filter((i) => i.status !== 'Present').map((i) => ({ itemId: i.itemId, name: i.name, status: i.status, notes: i.notes })) };
   inv.ropes.forEach((rp) => {
     const r = S.data.ropes.find((x) => x.id === rp.ropeId);
     if (!r) return;
-    if (rp.damage === 'Yes') r.status = 'Damaged - Review';
+    if (rp.damage === 'Yes') { r.status = 'Damaged - Review'; r.lastDamage = { at: performedAt, notes: rp.damageNotes, by: S.user.name || S.user.email }; }
+    r.lastInspectionDamage = rp.damage === 'Yes';
     if (rp.used === 'Yes') { r.uses = (r.uses || 0) + 1; if (!r.lastUsed || rp.dateUsed > r.lastUsed) r.lastUsed = rp.dateUsed; }
     r.lastInspected = performedAt;
   });
