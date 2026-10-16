@@ -1,7 +1,7 @@
 /* SORT Inventory — offline-capable front end. Talks to the Apps Script API in config.js. */
 'use strict';
 
-const APP_VERSION = '1.7.0';
+const APP_VERSION = '1.8.0';
 const API_URL = ((window.APP_CONFIG || {}).API_URL || '').trim();
 
 /* =============================== Storage & state =============================== */
@@ -1622,7 +1622,7 @@ function trWhyNot(e) {
 
 function trTabs(tab) {
   const isAdmin = S.user && S.user.isAdmin;
-  const t = [['', 'Calendar'], ['mine', 'My trainings']].concat(isAdmin ? [['manage', 'Manage dates'], ['members', 'Member status']] : []);
+  const t = [['', 'Calendar'], ['mine', 'My trainings']].concat(trMySpecs().length ? [['lead', '★ Lead']] : [], isAdmin ? [['manage', 'Manage dates'], ['members', 'Member status']] : []);
   return '<div class="tabs">' + t.map(([k, l]) => '<button data-go="#/training' + (k ? '/' + k : '') + '" class="' + (k === tab ? 'on' : '') + '">' + l + '</button>').join('') + '</div>';
 }
 
@@ -1783,8 +1783,9 @@ function parseDates(text, year) {
 
 /* ---------- Calendar ---------- */
 function renderTraining(tab) {
-  setHeader('Training', tab === 'mine' ? 'My trainings' : tab === 'manage' ? 'Manage dates' : tab === 'members' ? 'Member status' : 'Calendar', '#/home');
+  setHeader('Training', tab === 'lead' ? 'Lead' : tab === 'mine' ? 'My trainings' : tab === 'manage' ? 'Manage dates' : tab === 'members' ? 'Member status' : 'Calendar', '#/home');
   if (tab === 'mine') return trMine();
+  if (tab === 'lead') return trMySpecs().length ? trLead() : go('#/training');
   if (tab === 'manage') return S.user.isAdmin ? trManage() : go('#/training');
   if (tab === 'members') return S.user.isAdmin ? trMembers() : go('#/training');
   return trCalendar();
@@ -1892,12 +1893,14 @@ function trManage() {
         '<div class="sub">' + esc(trDate(e.date)) + (e.start ? ' · ' + esc(trTime(e)) : '') + (e.location ? ' · ' + esc(e.location) : '') + '</div></div>' +
         '<span class="badge' + (e.capacity && e.attendees.length >= e.capacity ? ' bad' : '') + '">' + esc(e.capacity ? e.attendees.length + '/' + e.capacity : String(e.attendees.length)) + '</span></button>').join('') + '</div>').join('')
       : emptyBox('No trainings for ' + year + ' yet. In January, add the year\'s dates here — "Add several dates" lets you enter every date for one training type at once.')) +
+    trLeadsAdmin() +
     '<p class="muted small" style="margin:14px 4px">Training types and the yearly requirements live in the <b>TrainingTypes</b> and <b>TrainingRules</b> tabs of the sheet (e.g. change "Rope days" Required from 2 to 3).</p>';
   bindGo();
   const redraw = () => { const y = window.scrollY; trManage(); window.scrollTo(0, y); };
   trBind(redraw);
   trYearBind(redraw);
   $('[data-act=add]').onclick = () => trEditEvent(null, redraw);
+  trLeadsAdminBind(redraw);
   $('[data-act=bulk]').onclick = async () => {
     const f = trEventFields().filter((x) => x.name !== 'Date');
     f.splice(1, 0, { name: 'dates', label: 'Dates — one per line', type: 'textarea', required: true, placeholder: '3/6\n4/10/' + year + '\n' + year + '-09-11', hint: 'Month/day uses ' + year + ' unless you add the year. All dates get the same time, location and spots.' });
@@ -1906,6 +1909,118 @@ function trManage() {
     const v = r.values, p = parseDates(v.dates, year);
     if (await trDo('bulkAddTraining', { type: v.Type, dates: p.ok, start: v.StartTime, end: v.EndTime, location: v.Location, capacity: v.Capacity, notes: v.Notes }, plural(p.ok.length, v.Type + ' date') + ' added')) redraw();
   };
+}
+
+/* ---------- Specialty leads ---------- */
+const trSpecOf = (type) => trType(type).specialty || type;
+const trSpecTypes = (spec) => TR().types.filter((t) => (t.specialty || t.type) === spec).map((t) => t.type);
+const trLeadsOf = (spec) => (TR().leads || []).filter((l) => l.specialty === spec);
+function trMySpecs() {
+  const out = [];
+  (TR().leads || []).forEach((l) => { if (S.user && l.email === S.user.email && out.indexOf(l.specialty) < 0) out.push(l.specialty); });
+  return out;
+}
+
+function trLead() {
+  const year = (S.trYear = S.trYear || trYear());
+  const specs = trMySpecs();
+  view().innerHTML = trTabs('lead') + trYearNav(year) +
+    '<p class="muted small" style="margin:-2px 4px 10px">You are a lead for <b>' + esc(specs.join(', ')) + '</b>. Tap a date to see who\'s going and email them.</p>' +
+    specs.map((spec) => {
+      const types = trSpecTypes(spec);
+      const evs = TR().events.filter((e) => e.date.slice(0, 4) === year && types.indexOf(e.type) >= 0);
+      const co = trLeadsOf(spec).map((l) => l.name + (l.email === S.user.email ? ' (you)' : ''));
+      const total = evs.reduce((n, e) => n + e.attendees.length, 0);
+      return '<div class="section-title">' + esc(spec) + '<span class="spacer"></span><span style="text-transform:none;letter-spacing:0;font-weight:600">' + plural(evs.length, 'date') + ' · ' + total + ' sign-ups</span></div>' +
+        '<div class="muted small" style="margin:-4px 4px 8px">Leads: ' + esc(co.join(', ')) + (types.length > 1 ? ' · Includes ' + esc(types.join(', ')) : '') + '</div>' +
+        (evs.length ? '<div class="list">' + evs.map((e) => {
+          const past = e.date < todayStr(), full = e.capacity && e.attendees.length >= e.capacity;
+          return '<button class="list-item' + (past ? ' past-row' : '') + '" data-lead-ev="' + esc(e.id) + '"><span class="tr-bar" style="background:' + esc(trType(e.type).color) + '"></span>' +
+            '<div class="main"><div class="name">' + esc(trDate(e.date, { weekday: 'short', month: 'short', day: 'numeric' })) + (types.length > 1 ? ' · ' + esc(e.type) : '') + '</div>' +
+            '<div class="sub">' + esc([trTime(e), e.location].filter(Boolean).join(' · ') || '—') + (past ? ' · past' : '') + '</div></div>' +
+            '<div class="lead-count' + (full ? ' full' : e.attendees.length ? '' : ' zero') + '"><b>' + e.attendees.length + (e.capacity ? '<small>/' + e.capacity + '</small>' : '') + '</b><span>signed up</span></div>' + I.chev + '</button>';
+        }).join('') + '</div>' : emptyBox('No ' + spec + ' dates in ' + year + ' yet.'));
+    }).join('');
+  bindGo();
+  const redraw = () => { const y = window.scrollY; trLead(); window.scrollTo(0, y); };
+  trBind(redraw); trYearBind(redraw);
+  const base = view().onclick;
+  view().onclick = (ev) => {
+    const b = ev.target.closest('[data-lead-ev]');
+    if (b) return trLeadEvent(b.dataset.leadEv, redraw);
+    return base(ev);
+  };
+}
+
+function trLeadEvent(id, redraw) {
+  const e = TR().events.find((x) => x.id === id);
+  if (!e) return;
+  const spec = trSpecOf(e.type), t = trType(e.type), leads = trLeadsOf(spec);
+  const bd = openModal(
+    '<div class="tr-modal-type" style="--c:' + esc(t.color) + '">' + esc(e.type) + '</div>' +
+    '<h3 style="margin-top:4px">' + esc(trDate(e.date, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })) + '</h3>' +
+    '<div class="card"><dl class="kv"><dt>Hours</dt><dd>' + esc(trTime(e) || 'Not set') + '</dd><dt>Location</dt><dd>' + esc(e.location || '—') + '</dd>' +
+    '<dt>Signed up</dt><dd>' + e.attendees.length + (e.capacity ? ' of ' + e.capacity + ' spots' : '') + '</dd>' + (e.notes ? '<dt>Notes</dt><dd>' + esc(e.notes) + '</dd>' : '') + '</dl></div>' +
+    '<div class="section-title">Members going (' + e.attendees.length + ')</div>' +
+    '<div class="list">' + (e.attendees.length ? e.attendees.map((a, i) => '<div class="list-item" style="min-height:52px"><span class="lead-num">' + (i + 1) + '</span><div class="main"><div class="name" style="font-weight:600">' + esc(a.name || a.email) + '</div><div class="sub">' + esc(a.email) + '</div></div></div>').join('')
+      : '<div class="empty">No one has signed up yet.</div>') + '</div>' +
+    '<div class="muted small" style="margin:10px 4px 0">' + esc(spec) + ' leads: ' + esc(leads.map((l) => l.name).join(', ') || '—') + '</div>' +
+    '<button class="btn primary block" style="margin-top:14px" data-m="email">✉ Email members going</button>' +
+    '<div class="btn-row" style="margin-top:8px"><button class="btn" data-m="close">Close</button></div>');
+  bd.addEventListener('click', async (ev) => {
+    const m = ev.target.closest('[data-m]');
+    if (ev.target === bd || (m && m.dataset.m === 'close')) return closeModal();
+    if (m && m.dataset.m === 'email') { closeModal(); trLeadCompose(e, () => trLeadEvent(id, redraw)); }
+  });
+}
+
+async function trLeadCompose(e, back) {
+  const spec = trSpecOf(e.type), leads = trLeadsOf(spec);
+  const recips = [];
+  leads.map((l) => l.email).concat(e.attendees.map((a) => a.email), [S.user.email]).forEach((x) => { if (recips.indexOf(x) < 0) recips.push(x); });
+  const r = await formModal('Email ' + e.type + ' · ' + trDate(e.date), [
+    { name: 'subject', label: 'Subject', required: true },
+    { name: 'message', label: 'Message', type: 'textarea', required: true, placeholder: 'e.g. Meet at Station 3 at 0745. Bring harness, helmet and lunch. Rain plan: classroom.' }
+  ], { subject: e.type + ' training — ' + trDate(e.date, { weekday: 'short', month: 'short', day: 'numeric' }) },
+  { submit: 'Send email', intro: 'Goes to ' + plural(e.attendees.length, 'member') + ' signed up and ' + plural(leads.length, spec + ' lead') + ' (' + recips.length + ' people incl. you). Replies come to you.' });
+  if (!r || !r.values) return back && back();
+  if (!navigator.onLine) { toast('Sending email needs an internet connection', 'bad'); return; }
+  try {
+    const res = await api('trainingEmail', { eventId: e.id, subject: r.values.subject, message: r.values.message });
+    toast('Email sent to ' + res.sent + ' people', 'good');
+  } catch (err) { if (!err.auth) toast(err.message, 'bad'); }
+}
+
+function trLeadsAdmin() {
+  const leads = TR().leads || [], specs = TR().specialties || [];
+  return '<div class="section-title">Specialty leads<span class="spacer"></span><button class="btn ghost sm" data-act="addLead">+ Add lead</button></div>' +
+    '<div class="list">' + specs.map((spec) => {
+      const ls = leads.filter((l) => l.specialty === spec);
+      return '<div class="list-item lead-admin-row"><div class="main"><div class="name">' + esc(spec) + '</div><div class="lead-chips">' +
+        (ls.length ? ls.map((l) => '<span class="lead-chip">' + esc(l.name) + '<button data-rmlead="' + esc(l.email) + '" data-spec="' + esc(spec) + '" aria-label="Remove ' + esc(l.name) + '">×</button></span>').join('') : '<span class="muted small">No lead yet</span>') +
+        '</div></div></div>';
+    }).join('') + '</div>' +
+    '<p class="muted small" style="margin:6px 4px 0">Leads see a <b>★ Lead</b> button in Training for their specialties, with sign-up counts and a way to email everyone going.</p>';
+}
+
+function trLeadsAdminBind(redraw) {
+  const add = $('[data-act=addLead]');
+  if (add) add.onclick = async () => {
+    let users;
+    try { users = (await api('listUsers')).users.filter((u) => u.active); } catch (err) { return toast(err.message, 'bad'); }
+    users.sort((x, y) => (x.lastName || x.name).localeCompare(y.lastName || y.name));
+    const r = await formModal('Add specialty lead', [
+      { name: 'email', label: 'Member', type: 'select', required: true, placeholder: 'Choose…', options: users.map((u) => ({ value: u.email, label: u.lastName ? u.lastName + ', ' + u.firstName : u.name || u.email })) },
+      { name: 'specialty', label: 'Specialty', type: 'select', required: true, placeholder: 'Choose…', options: TR().specialties || [] }
+    ], {}, { submit: 'Add lead', intro: 'A specialty can have several leads, and a member can lead more than one specialty.' });
+    if (r && r.values && await trDo('trainingSetLead', r.values, 'Lead added')) redraw();
+  };
+  $$('[data-rmlead]').forEach((b) => b.onclick = async (ev) => {
+    ev.stopPropagation();
+    const l = (TR().leads || []).find((x) => x.email === b.dataset.rmlead && x.specialty === b.dataset.spec);
+    if (await confirmModal('Remove ' + (l ? l.name : b.dataset.rmlead) + '?', 'They will no longer be a ' + esc(b.dataset.spec) + ' lead.', 'Remove', true))
+      if (await trDo('trainingRemoveLead', { email: b.dataset.rmlead, specialty: b.dataset.spec }, 'Lead removed')) redraw();
+  });
 }
 
 /* ---------- Admin: member status ---------- */

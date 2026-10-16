@@ -418,3 +418,18 @@ textarea.input { min-height: 84px; resize: vertical; }
 .tr-pills { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .tr-pill { border: 1px dashed var(--warn); color: var(--warn); background: var(--warn-soft); font-weight: 700; font-size: 13px; padding: 5px 10px; border-radius: 999px; }
 .tr-pill.done { border: 1px solid var(--ok); color: var(--ok); background: var(--ok-soft); }
+
+/* ---------- Specialty leads ---------- */
+.lead-count { text-align: center; min-width: 58px; flex: none; }
+.lead-count b { display: block; font-size: 22px; line-height: 1.1; color: var(--ok); }
+.lead-count b small { font-size: 13px; color: var(--ink-3); font-weight: 600; }
+.lead-count span { font-size: 11px; color: var(--ink-3); }
+.lead-count.zero b { color: var(--ink-3); }
+.lead-count.full b { color: var(--bad); }
+.past-row { opacity: .6; }
+.lead-num { width: 26px; height: 26px; border-radius: 50%; background: var(--surface-2); border: 1px solid var(--line); display: grid; place-items: center; font-size: 13px; font-weight: 700; color: var(--ink-2); flex: none; }
+.lead-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.lead-chip { display: inline-flex; align-items: center; gap: 2px; background: var(--brand-soft); color: var(--brand); font-weight: 600; font-size: 14px; border-radius: 999px; padding: 3px 4px 3px 10px; }
+.lead-chip button { border: 0; background: none; color: inherit; font-size: 18px; line-height: 1; width: 26px; height: 26px; border-radius: 50%; }
+.lead-chip button:active { background: rgba(0,0,0,.08); }
+.lead-admin-row { cursor: default; }
