@@ -1,6 +1,6 @@
-// Service worker: keeps the app shell available offline.
-// Bump CACHE when you change any app file so phones pick up the update.
-const CACHE = 'sort-inventory-v9';
+// Service worker: keeps the app available offline.
+// Network-first: when online, phones always get the latest files (incl. config.js); the cache is the offline fallback.
+const CACHE = 'sort-inventory-v10';
 const ASSETS = ['./', './index.html', './styles.css', './app.js', './config.js', './qrcode.js',
                 './manifest.json', './icon-192.png', './icon-512.png'];
 
@@ -18,14 +18,12 @@ self.addEventListener('activate', (e) => {
 
 self.addEventListener('fetch', (e) => {
   const req = e.request;
-  if (req.method !== 'GET' || new URL(req.url).origin !== self.location.origin) return; // API calls go straight to network
+  if (req.method !== 'GET' || new URL(req.url).origin !== self.location.origin) return; // API calls go straight to the network
   e.respondWith(
-    caches.match(req, { ignoreSearch: true }).then((cached) => {
-      const network = fetch(req).then((res) => {
-        if (res && res.ok) { const copy = res.clone(); caches.open(CACHE).then((c) => c.put(req, copy)); }
-        return res;
-      }).catch(() => cached || (req.mode === 'navigate' ? caches.match('./index.html') : undefined));
-      return cached || network;
-    })
+    fetch(req, { cache: 'no-store' }).then((res) => {
+      if (res && res.ok) { const copy = res.clone(); caches.open(CACHE).then((c) => c.put(req, copy)); }
+      return res;
+    }).catch(() => caches.match(req, { ignoreSearch: true })
+      .then((hit) => hit || (req.mode === 'navigate' ? caches.match('./index.html') : undefined)))
   );
 });

@@ -1,7 +1,7 @@
 /* SORT Inventory — offline-capable front end. Talks to the Apps Script API in config.js. */
 'use strict';
 
-const APP_VERSION = '1.8.0';
+const APP_VERSION = '1.8.1';
 const API_URL = ((window.APP_CONFIG || {}).API_URL || '').trim();
 
 /* =============================== Storage & state =============================== */
@@ -143,7 +143,7 @@ async function api(action, payload = {}, opts = {}) {
     throw new Error('App not connected yet: put your Apps Script URL in config.js.');
   }
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), opts.timeout || 30000);
+  const timer = setTimeout(() => ctrl.abort(), opts.timeout || 60000);
   let res;
   try {
     res = await fetch(API_URL, {
@@ -154,13 +154,15 @@ async function api(action, payload = {}, opts = {}) {
       redirect: 'follow'
     });
   } catch (e) {
-    const err = new Error(navigator.onLine ? 'Could not reach the server. Check your connection.' : 'You are offline.');
+    const err = new Error(!navigator.onLine ? 'You are offline.'
+      : e && e.name === 'AbortError' ? 'The server took too long to answer. Try again in a moment.'
+      : 'Could not reach the server. If your internet works, open Connection help on the sign-in or My account screen.');
     err.network = true;
     throw err;
   } finally { clearTimeout(timer); }
   let j;
   try { j = await res.json(); } catch (e) {
-    const err = new Error('Unexpected server response. Check the Apps Script deployment (access must be "Anyone").');
+    const err = new Error('Unexpected server response — open Connection help on the sign-in or My account screen.');
     err.network = true;
     throw err;
   }
@@ -336,6 +338,7 @@ function render() {
   const parts = (location.hash.replace(/^#\/?/, '') || 'home').split('/').map(decodeURIComponent);
   S.route = parts;
   updatePill();
+  if (parts[0] === 'help') return renderHelp();
   if (!S.token) {
     if (parts[0] === 's' && parts[1]) S.pendingScan = parts[1];   // label scanned with the phone camera before signing in
     return renderAuth(parts[0] === 'signup' ? 'signup' : 'login');
@@ -393,6 +396,7 @@ function renderAuth(mode) {
     '</form>' +
     '<div class="switch-link">' + (signup ? 'Already have an account? <a href="#/login">Sign in</a>' : 'New member? <a href="#/signup">Create an account</a>') + '</div>' +
     (!navigator.onLine ? '<p class="center muted small" style="margin-top:20px">You are offline. Signing in needs a connection the first time.</p>' : '') +
+    '<p class="center small" style="margin-top:18px"><a href="#/help">Connection help</a></p>' +
     '</div>';
   const form = $('#authForm');
   form.addEventListener('submit', async (e) => {
@@ -2130,6 +2134,7 @@ function renderAccount() {
     '<dt>Waiting to sync</dt><dd>' + pending + '</dd><dt>Data updated</dt><dd>' + esc(S.lastSync ? fmtDateTime(S.lastSync) : '—') + '</dd></dl></div>' +
     '<div class="stack" style="margin-top:14px">' +
     '<button class="btn block" data-act="sync">Sync &amp; refresh now</button>' +
+    '<button class="btn block" data-go="#/help">Connection help</button>' +
     '<button class="btn block" data-act="pw">Change password</button>' +
     '<button class="btn block danger" data-act="logout">Sign out</button></div>' +
     '<div class="card small muted" style="margin-top:18px"><strong style="color:var(--ink)">Offline use</strong><br>Once you have signed in and loaded data, you can run inventories with no signal. Checks are saved on this device and upload automatically when you reconnect. ' +
@@ -2152,6 +2157,59 @@ function renderAccount() {
     LS.del('token'); LS.del('data'); LS.del('user');
     location.hash = '#/login';
     render();
+  };
+}
+
+/* ================================ Connection help ================================ */
+function renderHelp() {
+  setHeader('Connection help', 'Test the link to the Google Sheet', S.token ? '#/account' : '#/login');
+  const configured = API_URL && API_URL.indexOf('PASTE_') !== 0;
+  const urlOk = /^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/.test(API_URL);
+  view().innerHTML =
+    '<div class="card"><div class="small muted">Server address in config.js</div>' +
+    '<div class="code-url">' + esc(configured ? API_URL : 'Not set') + '</div>' +
+    (configured && !urlOk ? '<div class="error-box" style="margin:10px 0 0">This doesn\'t look like a deployed web app address. It should start with https://script.google.com/macros/s/ and end in <b>/exec</b> (not /dev, and not the editor address).</div>' : '') +
+    '<button class="btn primary block" style="margin-top:12px" data-act="test"' + (configured ? '' : ' disabled') + '>Test the server</button>' +
+    '<div id="testOut"></div></div>' +
+    '<div class="section-title">If the test fails, check these in order</div>' +
+    '<div class="card small help-list"><ol>' +
+    '<li><b>Who has access</b> — in Apps Script: Deploy → Manage deployments → ✏️. "Execute as" must be <b>Me</b> and "Who has access" must be <b>Anyone</b> (not "Anyone with Google account" or "Only myself").</li>' +
+    '<li><b>New permissions</b> — after pasting a new Code.gs, open the Apps Script editor, pick <b>setup</b> and click <b>Run</b>; if Google asks for permission, allow it. Then run <b>sendTestEmail</b> once. Until the owner approves new permissions, every request fails.</li>' +
+    '<li><b>Publish the update</b> — saving the code is not enough: Deploy → Manage deployments → ✏️ → Version: <b>New version</b> → Deploy. (Creating a <i>new deployment</i> instead gives a new address; then config.js must be updated.)</li>' +
+    '<li><b>Code pasted cleanly</b> — Code.gs must contain only the new code. Pasting below the old code breaks the whole script ("already been declared"). Select all, delete, paste, save.</li>' +
+    '<li><b>Open the server link yourself</b> — <a href="' + esc(configured ? API_URL : '#') + '" target="_blank" rel="noopener">open it in a browser</a>. You should see a short line of text starting with <code>{"ok":true,"service":"SORT Inventory API"</code>. A Google sign-in page means #1; "Authorization is required" or an error page means #2 or #4.</li>' +
+    '<li><b>Work networks</b> — some department Wi-Fi or phone security apps block script.google.com. Try on cellular data.</li>' +
+    '</ol></div>' +
+    '<p class="center muted small">App version ' + APP_VERSION + '</p>';
+  bindGo();
+  const btn = $('[data-act=test]');
+  if (btn) btn.onclick = async () => {
+    const out = $('#testOut');
+    btn.disabled = true; btn.textContent = 'Testing…';
+    const line = (ok, text) => '<div class="test-line ' + (ok ? 'ok' : 'bad') + '">' + (ok ? '✓ ' : '✗ ') + text + '</div>';
+    let html = '';
+    const t0 = Date.now();
+    try {
+      const ctrl = new AbortController(); const tm = setTimeout(() => ctrl.abort(), 60000);
+      const r = await fetch(API_URL, { method: 'GET', redirect: 'follow', signal: ctrl.signal }); clearTimeout(tm);
+      let j = null; try { j = await r.json(); } catch (e) {}
+      if (j && j.ok) {
+        html += line(true, 'Server reached in ' + ((Date.now() - t0) / 1000).toFixed(1) + 's — server version ' + esc(j.version || '?'));
+        if (j.version && j.version.split('.').slice(0, 2).join('.') !== APP_VERSION.split('.').slice(0, 2).join('.'))
+          html += line(false, 'The server is running version ' + esc(j.version) + ' but this app is ' + APP_VERSION + '. Paste the latest Code.gs, run setup, then Deploy → Manage deployments → ✏️ → New version.');
+        try {
+          const p = await fetch(API_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ action: 'ping' }), redirect: 'follow' });
+          const pj = await p.json();
+          html += line(!!pj.ok, pj.ok ? 'Sign-in requests work' : 'Server error: ' + esc(pj.error || 'unknown'));
+        } catch (e) { html += line(false, 'Basic test worked but sign-in requests failed — usually new permissions not approved (#2) or a script error (#4).'); }
+      } else {
+        html += line(false, 'Got a response, but not from the app — usually #1 (access not "Anyone") or #2 (permissions). Use #5 to see what Google is returning.');
+      }
+    } catch (e) {
+      html += line(false, e && e.name === 'AbortError' ? 'No answer within 60 seconds.' : 'Blocked before it reached the app. Most often #1 (access), #2 (permissions) or #4 (code pasted twice). Open the server link (#5) to see the exact message.');
+    }
+    out.innerHTML = '<div style="margin-top:12px">' + html + '</div>';
+    btn.disabled = false; btn.textContent = 'Test again';
   };
 }
 
